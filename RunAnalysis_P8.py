@@ -1,3 +1,9 @@
+
+import os
+os.chdir('/pfs/carlson/GCE_sys')
+import sys
+sys.path.append('/pfs/carlson/GCE_sys')
+
 import numpy as np
 import h5py
 import Analysis
@@ -32,26 +38,111 @@ def AddFitMetadata(path, h5_path, A, extra_dict=None):
 
         if extra_dict is not None:
             for key, val in extra_dict.items():
-                if key == 'residual':
+                if key in ['residual','loglike_array','loglike_total_array', 'dm_spec_array', 'dm_spec_unc_array']:
                     try:
-                        del h5[h5_path+'/residual']
+                        del h5[h5_path+'/'+key]
                     except: 
                         pass
 
-                    h5.create_dataset(h5_path+'/residual', data=val, dtype='float32')
+                    h5.create_dataset(h5_path+'/'+key, data=val, dtype='float32')
                     print 'Saving new residual... Shape = ', val.shape
 
               #       try:
               #           del h5[h5_path+'/residual']
-        		    # except:
-        			   #  #pass
+                    # except:
+                       #  #pass
               #           h5.create_dataset(h5_path+'/residual', data=val, dtype='float32')
                 else:
                     fa.create(key, val)
         h5.close()
 
+def AddHDF5TemplateRings(self, hdf5file, verbosity=0, multiplier=1., bremsfrac=None, E_subsample=3,
+           fixSpectrum=False, noPSF=False, separate_ics=True, fix_ics=False, fix_brem=False):
+    """
+    This method takes a base analysis prefix, along with an X_CO profile and generates the combined diffuse template,
+    or components of the diffuse template.
 
-def LoadModel(basedir, galprop_tag, AQ_templates=False,psf=-1):
+    :param basedir: Base directory to read from
+    :param tag: Tag for the galprop file.  This is the part between '_54_' and '.gz'.
+    :param verbosity: 0 is quiet, >1 prints status.
+    :param multiplier: Blur each map using Gaussian kernel with sigma=FWHM_PSF*multiplier/2
+    :param bremsfrac: If None, brems is treated as independent.  Otherwise Brem normalization
+        is linked to Pi0 normalization, scaled by a factor bremsfrac.
+    :param E_subsample: Number of energy sub bins to use when integrating over each energy band.
+    :param fixSpectrum: Allow the spectrum to float in each energy bin.
+    :param noPSF: Do not apply PSF if True.  Can enhance speed.
+    :param separate_ics: If true, the CMB template and optical+far-infrared are treated as two templates.
+        (normalization of OPT and FIR are linked)
+    :param fix_ics: If true and separate_ics==False, the norm of the ICS template is fixed to the galprop prediction
+    :param fix_brem: If true and bremsfrac==None, the norm of the brem template is fixed to the galprop prediction
+    """
+
+    #---------------------------------------------------------------------------------
+    # Load templates
+
+    if verbosity>0:
+        print 'Loading HDF5 file'
+
+    h5 = h5py.File(hdf5file, 'r')
+    energies = h5['/templates/energies'][()]
+
+    # For some reason, older versions of galprop files have slightly different data structures.  This try/except
+    # will detect the right one to use.
+    comps, comps_new = {}, {}
+
+    
+    comps['Pi0_Brems_0'] = h5['/templates/pi0_0'][()] + 1.25*h5['/templates/brem_0'][()]
+    comps['Pi0_Brems_1'] = h5['/templates/pi0_1'][()] + 1.25*h5['/templates/brem_1'][()]
+    comps_new['Pi0_Brems_0'] = np.zeros((self.n_bins, 12*self.nside**2))
+    comps_new['Pi0_Brems_1'] = np.zeros((self.n_bins, 12*self.nside**2))
+
+    #---------------------------------------------------------------------------------
+    # Now we integrate each model over the energy bins...
+    #
+    # Multiprocessing for speed. There is an async callback which applies each result to
+    # the arrays.  Not sure why RunAsync needs new thread pool for each component, but this
+    # works and decreases memory footprint.
+    def callback(result):
+        idx, comp, dat = result
+        comps_new[comp][idx] = dat
+
+    def RunAsync(component):
+        #p = mp.Pool(mp.cpu_count())
+        for i_E in range(self.n_bins):
+            # p.apply_async(Tools.AsyncInterpolateHealpix,
+            #               [comps[component], energies, self.bin_edges[i_E], self.bin_edges[i_E+1],
+            #                i_E, component, E_subsample, self.nside],
+            #               callback=callback)
+
+            comps_new[component][i_E] = Tools.InterpolateHealpix(comps[component], energies,  self.bin_edges[i_E],
+                                                                 self.bin_edges[i_E+1], E_bins=E_subsample,
+                                                                 nside_out=self.nside)
+        # p.close()
+        # p.join()
+
+    # For each component, run the async sampling/sizing.
+    for key in comps:
+        if verbosity > 0:
+            print 'Integrating and Resampling', key, 'templates...'
+            sys.stdout.flush()
+        RunAsync(key)
+
+
+    #---------------------------------------------------------------------------------
+    # Now we just need to add the templates to the active template stack
+
+    # Delete previous keys for diffuse model
+    for key in ['Pi0_Brems_0', 'Pi0_Brems_1',]:
+        self.templateList.pop(key, None)
+
+    
+    self.AddTemplate(name='Pi0_Brems_0', healpixCube=comps_new['Pi0_Brems_0'], fixSpectrum=fixSpectrum, fixNorm=False,
+                           value=1., ApplyIRF=True, sourceClass='GEN', limits=[None, None], multiplier=multiplier, noPSF=noPSF)
+    self.AddTemplate(name='Pi0_Brems_1', healpixCube=comps_new['Pi0_Brems_1'], fixSpectrum=fixSpectrum, fixNorm=False,
+                           value=1., ApplyIRF=True, sourceClass='GEN', limits=[None, None], multiplier=multiplier, noPSF=noPSF)
+
+
+def LoadModel(basedir, galprop_tag, AQ_templates=False,psf=-1, split_plane=False):
     # Load various diffuse models and run fits.
     print 'Running Analysis for model', galprop_tag
 
@@ -99,7 +190,39 @@ def LoadModel(basedir, galprop_tag, AQ_templates=False,psf=-1):
             A.templateList['AqRift'].healpixCube[i] = A.templateList['AqRift'].healpixCube[i].clip(0)
             A.templateList['SagCarina'].healpixCube[i] = A.templateList['SagCarina'].healpixCube[i].clip(0)
 
+    # Split the plane 
+    if split_plane:
+        xco = h5['/fit_results/global'].attrs['global_XCO']
+    
+        # Add the inner rings independently
+        AddHDF5TemplateRings(A, hdf5file=basedir +'/'+ galprop_tag+'.hdf5',verbosity=1, multiplier=1., bremsfrac=1.25, 
+                      E_subsample=2, fixSpectrum=False, separate_ics=False)
+        
+        # Subtract the inner rings off of the original diffuse model.
+        A.templateList['Pi0_Brems'].healpixCube -= A.templateList['Pi0_Brems_0'].healpixCube*xco[0]
+        A.templateList['Pi0_Brems'].healpixCube -= A.templateList['Pi0_Brems_1'].healpixCube*xco[1]
+        
+        # Split the GDE components into plane and off-plane
+        A.templateList['Pi0_Brems_offplane'] = deepcopy(A.templateList['Pi0_Brems'])
+        A.templateList['Pi0_Brems_offplane'].healpixCube *= A.GenSquareMask(l_range=[-7.5,7.5], b_range=[-7.5,7.5], plane_mask=2.)
+        A.templateList['Pi0_Brems_plane'] = deepcopy(A.templateList['Pi0_Brems'])
+        A.templateList['Pi0_Brems_plane'].healpixCube *= A.GenSquareMask(l_range=[-7.5,7.5], b_range=[-2,2], plane_mask=0.)
+        
+        A.templateList['ICS_offplane'] = deepcopy(A.templateList['ICS'])
+        A.templateList['ICS_offplane'].healpixCube *= A.GenSquareMask(l_range=[-7.5,7.5], b_range=[-7.5,7.5], plane_mask=2.)
+        A.templateList['ICS_plane'] = deepcopy(A.templateList['ICS'])
+        A.templateList['ICS_plane'].healpixCube *= A.GenSquareMask(l_range=[-7.5,7.5], b_range=[-2,2], plane_mask=0.)
+        
+        A.DeleteTemplate('ICS')
+        A.DeleteTemplate('Pi0_Brems')
+
     return A
+
+
+import Tools
+from copy import deepcopy
+
+
 
 
 
@@ -121,17 +244,26 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         #--------------------------------------------
         # GC fit without DM
         A.RunLikelihood(print_level=1, tol=2e2, precision=None, minos=True)[0]
-        AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC_no_dm'+psf_tag, A=A, extra_dict={'residual':np.array([A.residual[i]*A.mask for i in range(A.n_bins)])})
+
+        if psf ==-1:
+            AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC_no_dm'+psf_tag, A=A, 
+                extra_dict={'residual':np.array([A.residual[i]*A.mask for i in range(A.n_bins)])})
+        else:
+            AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC_no_dm'+psf_tag, A=A, 
+                extra_dict=None)
         #AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC_no_dm/', A=A)
 
         #--------------------------------------------
         # GCE Fit
         A.ResetFit()    
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                        r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
         A.RunLikelihood(print_level=1, tol=2e2, precision=None, minos=True)[0]
 
-        AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC'+psf_tag, A=A, extra_dict={'residual':np.array([A.residual[i]*A.mask for i in range(A.n_bins)])})
+        if psf ==-1:
+            AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC'+psf_tag, A=A, extra_dict={'residual':np.array([A.residual[i]*A.mask for i in range(A.n_bins)])})
+        else: 
+            AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC'+psf_tag, A=A,)
 
         print 'Dark matter template Raw Values.', list(A.templateList['DM'].value)
         #AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC/', A=A)
@@ -168,7 +300,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         for i_ar, ar in enumerate(ars):
             print galprop_tag, ' axes offset fitting completed:', i_ar/float(len(ars))
             A.ResetFit()    
-            A.AddDMTemplate(profile='NFW', limits=[-5,5], decay=False, gamma=1.25, 
+            A.AddDMTemplate(profile='NFW', limits=[-5,5], decay=False, gamma=1.05, 
                            r_s=20.0, axesratio=ar, offset=(0, 0), spec_file=None,)
             A.RunLikelihood(print_level=0, tol=2e2, precision=None, minos=False)[0]
             loglike.append(A.loglike)
@@ -203,7 +335,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
             # ll_nodm = np.sum(A.loglike)
 
             A.ResetFit()
-            A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, r_s=20.0, axesratio=1, offset=(lon, 0), spec_file=None,)
+            A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, r_s=20.0, axesratio=1, offset=(lon, 0), spec_file=None,)
 
             A.RunLikelihood(print_level=0, tol=2e2, precision=None, minos=False)[0]
 
@@ -232,7 +364,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
             for i_b, lat in enumerate(lons):
                 print 'lat/lon fitting completed:', (len(lons)*i_l + i_b)/float(len(lons)**2)
                 A.ResetFit()    
-                A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+                A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                                r_s=20.0, axesratio=1, offset=(lon, lat), spec_file=None,)
                 A.RunLikelihood(print_level=0, tol=2e2, precision=None, minos=False)[0]
                 
@@ -252,7 +384,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
 
         
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                        r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
 
         for i_r, r in enumerate(radius[:-1]):
@@ -279,7 +411,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         #radius = [2,4,10,15,20]
         loglike_total, loglike, dm_spec, dm_spec_unc = [], [], [], []
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                                    r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None)
         for i_r, r in enumerate(radius[:-1]):
             quadrants = [['E', -45, 45], ['N', 45, 135], ['W', 135, 225], ['S', 225, 315]]
@@ -322,7 +454,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
             ll_nodm = np.sum(A.loglike)
 
             A.ResetFit()
-            A.AddDMTemplate(profile='NFW', limits=[-500,500], decay=False, gamma=1.25, r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
+            A.AddDMTemplate(profile='NFW', limits=[-500,500], decay=False, gamma=1.05, r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
 
             A.RunLikelihood(print_level=0, tol=2e2, precision=None, minos=False)[0]
 
@@ -361,7 +493,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
                 # ll_nodm = np.sum(A.loglike)
 
                 A.ResetFit()
-                A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, r_s=20.0, axesratio=1, offset=(lon, 0), spec_file=None,)
+                A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, r_s=20.0, axesratio=1, offset=(lon, 0), spec_file=None,)
 
                 A.RunLikelihood(print_level=0, tol=2e2, precision=None, minos=False)[0]
 
@@ -387,7 +519,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
     elif analysis == 10:
         loglike_total, loglike, dm_spec, dm_spec_unc = [], [], [], []
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                                    r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None)
     
         for i_r in range(1,11):
@@ -423,7 +555,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         A.GenSquareMask(l_range=[-20.,20.], b_range=[-20.,20.], plane_mask=2.)
         A.DeleteTemplate('ICS')
 
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
         
         A.RunLikelihood(print_level=1, tol=2e2, precision=None, minos=False)[0]
         AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/ics_split'+psf_tag, A=A)
@@ -450,7 +582,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         # Restore back to normal mask
         A.GenSquareMask(l_range=[-20.,20.], b_range=[-20.,20.], plane_mask=2.)
         A.DeleteTemplate('Bubbles')
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
         A.RunLikelihood(print_level=1, tol=2e2, precision=None, minos=False)[0]
         AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/bubbles_split'+psf_tag, A=A)
 
@@ -519,8 +651,8 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         loglike_total, loglike, dm_spec, dm_spec_unc = [], [], [], []
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
         
-        scale_factors = np.linspace(0,2,9)
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        scale_factors = np.linspace(0,2,11)
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                                    r_s=20.0, axesratio=1., offset=(0, 0), spec_file=None)
 
         for i, scale_factor in enumerate(scale_factors):
@@ -553,8 +685,8 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         loglike_total, loglike, dm_spec, dm_spec_unc = [], [], [], []
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
         
-        scale_factors = np.linspace(0,2,9)
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        scale_factors = np.linspace(0,2,11)
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                                    r_s=20.0, axesratio=1., offset=(0, 0), spec_file=None)
 
         for i, scale_factor in enumerate(scale_factors):
@@ -591,7 +723,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
         
         scale_factors = np.linspace(0.01,.4,11)
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                                    r_s=20.0, axesratio=1., offset=(0, 0), spec_file=None)
 
         for i, scale_factor in enumerate(scale_factors):
@@ -624,7 +756,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
         
         scale_factors = np.linspace(2,8,13)
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                                    r_s=20.0, axesratio=1., offset=(0, 0), spec_file=None)
 
         for i, scale_factor in enumerate(scale_factors):
@@ -652,12 +784,12 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
     elif analysis == 19:
         #--------------------------------------------
         # Scan Radius
-        radius = np.array([0,] + list(np.linspace(2,28,7)))
+        radius = list(np.linspace(2,28,6))
         loglike_total, loglike, dm_spec, dm_spec_unc = [], [], [], []
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
 
         
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                        r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
 
         for i_r, r in enumerate(radius[:-1]):
@@ -668,6 +800,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
             A.templateList['ring_%i'%i_r] = deepcopy(A.templateList['PSC'])    
             A.templateList['ring_%i'%i_r].fixSpectrum = False
             A.templateList['ring_%i'%i_r].fixNorm = False
+            A.templateList['ring_%i'%i_r].limits = [0., 10.]
             # Loop over energy and multiply by mask.
             for i_E in range(A.n_bins):
                 A.templateList['ring_%i'%i_r].healpixCube[i_E] *= mask
@@ -677,7 +810,10 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         A.RunLikelihood(print_level=1, tol=2e2, precision=None, minos=False)[0]
         
         raw_values = np.array([np.array(A.templateList['ring_%i'%i_r].value) for i_r, r in enumerate(radius[:-1])])
-        raw_values_unc = np.array([np.array(A.templateList['ring_%i'%i_r].valueUnc).astype(np.float32) for i_r, r in enumerate(radius[:-1])]).astype(np.float32)
+        try:
+            raw_values_unc = np.array([np.array(A.templateList['ring_%i'%i_r].valueUnc) for i_r, r in enumerate(radius[:-1])])
+        except:
+            raw_values_unc = 0 
              
         r_bins = [(radius[i], radius[i+1]) for i in range(len(radius)-1)]
         AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/scan_psc_rings'+psf_tag, A=A, 
@@ -692,7 +828,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
         
         scale_factors = np.linspace(0,2,9)
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                                    r_s=20.0, axesratio=1., offset=(0, 0), spec_file=None)
 
         for i, scale_factor in enumerate(scale_factors):
@@ -723,12 +859,12 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
     elif analysis == 21:
         #--------------------------------------------
         # Scan Radius
-        radius = np.array([0.0,] + list(np.linspace(1,21.2,3)))
+        radius = np.array([0.0,2,21.5])
         loglike_total, loglike, dm_spec, dm_spec_unc = [], [], [], []
         A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
 
         
-        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+        A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                        r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
 
         for i_r, r in enumerate(radius[:-1]):
@@ -739,7 +875,7 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
             A.templateList['ring_%i'%i_r] = deepcopy(A.templateList['PSC'])    
             A.templateList['ring_%i'%i_r].fixSpectrum = False
             A.templateList['ring_%i'%i_r].fixNorm = False
-            A.templateList['ring_%i'%i_r].limits = [0,10.]
+            A.templateList['ring_%i'%i_r].limits = [0,3.]
             # Loop over energy and multiply by mask.
             for i_E in range(A.n_bins):
                 A.templateList['ring_%i'%i_r].healpixCube[i_E] *= mask
@@ -750,14 +886,190 @@ def Analyze(basedir, galprop_tag, A, analysis=0, psf=-1):
         A.RunLikelihood(print_level=1, tol=2e2, precision=None, minos=False)[0]
 
         raw_values = np.array([np.array(A.templateList['ring_%i'%i_r].value) for i_r, r in enumerate(radius[:-1])])
-        raw_values_unc = np.array([np.array(A.templateList['ring_%i'%i_r].valueUnc) for i_r, r in enumerate(radius[:-1])])
+        # try:
+        #     raw_values_unc = np.array([np.array(A.templateList['ring_%i'%i_r].valueUnc) for i_r, r in enumerate(radius[:-1])])
+        # except:
+        #     raw_values_unc = 0  
                 
         r_bins = [(radius[i], radius[i+1]) for i in range(len(radius)-1)]
         AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/scan_psc_rings_15'+psf_tag, A=A, 
-            extra_dict={'radius':r_bins,'raw_values':raw_values, 'raw_values_unc':raw_values_unc})
+            extra_dict={'radius':r_bins,'raw_values':raw_values })#, 'raw_values_unc':raw_values_unc})
+
+    elif analysis == 22:
+        #--------------------------------------------
+        # Scan Slope and axis ratio simulateously.
+        gammas = np.linspace(0.,1.3,27)
+        axis_ratios = np.linspace(0.2,3,29)
+
+        # gammas = np.linspace(.25,1.25,1)
+        # axis_ratios = np.linspace(0.5,3.5,2)
+
+        loglike_total = np.zeros((len(gammas), len(axis_ratios)))
+        loglike, dm_spec, dm_spec_unc = [], [], []
+
+        for i_g, gamma in enumerate(gammas):
+            loglike.append([])
+            dm_spec.append([])
+            dm_spec_unc.append([])
+            avg_time = []
+
+            for i_ar, axis_ratio in enumerate(axis_ratios):
+
+                print 'axes offset fitting completed:', (i_g*len(axis_ratios)+i_ar)/float(len(gammas)*len(axis_ratios))
+                n_left = float(len(gammas)*len(axis_ratios)) - (i_g*len(axis_ratios)+i_ar)
+                import time 
+                start = time.time()
+
+                A.ResetFit()    
+                A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=gamma, 
+                               r_s=20.0, axesratio=axis_ratio, offset=(0, 0), spec_file=None)
+                A.RunLikelihood(print_level=0, tol=2e2, precision=None, minos=False)[0]
+                
+                loglike[i_g].append( A.loglike )
+                loglike_total[i_g,i_ar]=np.sum(A.loglike)
+                E, spec, specUnc = A.GetSpectrum('DM')
+                dm_spec[i_g].append(spec)
+                dm_spec_unc[i_g].append(specUnc)
+            print loglike_total
+
+            avg_time.append(time.time()-start)
+            print 'Estimated time to finish in minutes', n_left * np.average(avg_time)/60.
+
+        AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/scan_gamma_axis'+psf_tag, A=A, 
+                       extra_dict={'gamma': gammas,
+                                   'axis_ratios': axis_ratios,
+                                   'loglike_array':np.array(loglike),
+                                   'loglike_total_array':np.array(loglike_total),
+                                   'dm_spec_array':np.array(dm_spec),
+                                   'dm_spec_unc_array':np.array(dm_spec)})
+
+    elif analysis == 23:
+        #--------------------------------------------
+        # Scan Slope and axis ratio simulateously.
+        gammas = np.linspace(0.,1.3,27)
+        axis_ratios = np.linspace(0.2,3,29)
+        import time
+        avg_time = []
+
+        loglike_total = np.zeros((len(gammas), len(axis_ratios)))
+        loglike, dm_spec, dm_spec_unc = [], [], []
+
+        for i_g, gamma in enumerate(gammas):
+            loglike.append([])
+            dm_spec.append([])
+            dm_spec_unc.append([])
+
+            for i_ar, axis_ratio in enumerate(axis_ratios):
+                start = time.time()
+
+                A.ResetFit()    
+                print 'axes offset fitting completed:', (i_g*len(axis_ratios)+i_ar)/float(len(gammas)*len(axis_ratios))
+                n_left = float(len(gammas)*len(axis_ratios)) - (i_g*len(axis_ratios)+i_ar)
+
+                A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=gamma, 
+                               r_s=20.0, axesratio=axis_ratio, offset=(0, 0), spec_file=None)
+                
+                A.GenSquareMask(l_range=[-7.5,7.5], b_range=[-7.5,7.5], plane_mask=2.)
+                A.RunLikelihood(print_level=0, tol=2e2, precision=None, minos=False)[0]
+                loglike[i_g].append( A.loglike )
+                loglike_total[i_g,i_ar]=np.sum(A.loglike)
+                E, spec, specUnc = A.GetSpectrum('DM')
+                dm_spec[i_g].append(spec)
+                dm_spec_unc[i_g].append(specUnc)
+
+                avg_time.append(time.time()-start)
+                print 'Estimated time to finish in minutes', n_left * np.average(avg_time)/60.
+        
+        AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/scan_gamma_axis_15'+psf_tag, A=A, 
+                       extra_dict={'gamma': gammas,
+                                   'axis_ratios': axis_ratios,
+                                   'loglike_array':np.array(loglike),
+                                   'loglike_total_array':np.array(loglike_total),
+                                   'dm_spec_array':np.array(dm_spec),
+                                   'dm_spec_unc_array':np.array(dm_spec)})
+
+
+    if analysis == 24:
+        #--------------------------------------------
+        # Global fit allowing spectrum to float
+        
+        fval = []
+        A.GenSquareMask(l_range=[-180.,180], b_range=[-85.,85.], plane_mask=8.)        
+        ret = A.RunLikelihood(print_level=1, precision=None, tol=1e3, minos=False)[:2]
+        print ret
+        m, R = ret[:2]
+
+        fval.append(A.loglike)
+
+        A.GenSquareMask(l_range=[-180,-80], b_range=[-8.,8.], plane_mask=0)
+        A.GenSquareMask(l_range=[80,180], b_range=[-8.,8.], plane_mask=0, merge=True)
+        m, R = A.RunLikelihood(print_level=1, precision=None, tol=1e3, minos=False)[:2]
+        fval.append(A.loglike)
+        ret = A.RunLikelihood(print_level=1, precision=None, tol=1e3, minos=False)[:2]
+        print ret
+        m, R = ret[:2]
+
+        A.GenSquareMask(l_range=[-80,80], b_range=[-8.,8.], plane_mask=0)
+        m, R = A.RunLikelihood(print_level=1, precision=None, tol=1e3, minos=False)[:2]
+        fval.append(A.loglike)
+        ret = A.RunLikelihood(print_level=1, precision=None, tol=1e3, minos=False)[:2]
+        print ret
+        m, R = ret[:2]
+
+
+        AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/global_free_spectrum'+psf_tag, A=A, 
+            extra_dict={'localfval':fval[0],
+                        'outerfval':fval[1],
+                        'innerfval':fval[2]})
+        
+        #AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/GC_no_dm/', A=A)
 
 
 
+    # elif analysis == 24:
+    #     #--------------------------------------------
+    #     # Split plane analysis.
+    #     #--------------------------------------------
+    #     radius = list(np.linspace(2,28,6))
+    #     loglike_total, loglike, dm_spec, dm_spec_unc = [], [], [], []
+    #     A.AddIsotropicTemplate(fixNorm=False, fixSpectrum=False) # External chi^2 used to fix normalization within uncertainties
+
+        
+    #     A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+    #                    r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
+
+    #     A.GenSquareMask(l_range=[-7.5,7.5], b_range=[-7.5,7.5], plane_mask=0.)
+
+    #     for i_r, r in enumerate(radius[:-1]):
+    #         r1, r2 = r, radius[i_r+1]
+                        
+    #         mask = A.GenRadialMask(r1, r2, plane_mask=0, merge=False)
+    #         # Now take NFW template and copy it, multiplied by the mask            
+
+
+
+
+    #         A.templateList['ring_%i'%i_r] = deepcopy(A.templateList['PSC'])    
+    #         A.templateList['ring_%i'%i_r].fixSpectrum = False
+    #         A.templateList['ring_%i'%i_r].fixNorm = False
+    #         A.templateList['ring_%i'%i_r].limits = [0., 10.]
+    #         # Loop over energy and multiply by mask.
+    #         for i_E in range(A.n_bins):
+    #             A.templateList['ring_%i'%i_r].healpixCube[i_E] *= mask
+    #     # Restore back to normal mask and remove the original full PSC template, which is now replaced by rings above.
+    #     A.GenSquareMask(l_range=[-7.5,7.5], b_range=[-7.5,7.5], plane_mask=0.)
+    #     A.DeleteTemplate('PSC')
+    #     A.RunLikelihood(print_level=1, tol=2e2, precision=None, minos=False)[0]
+        
+    #     raw_values = np.array([np.array(A.templateList['ring_%i'%i_r].value) for i_r, r in enumerate(radius[:-1])])
+    #     try:
+    #         raw_values_unc = np.array([np.array(A.templateList['ring_%i'%i_r].valueUnc) for i_r, r in enumerate(radius[:-1])])
+    #     except:
+    #         raw_values_unc = 0 
+             
+    #     r_bins = [(radius[i], radius[i+1]) for i in range(len(radius)-1)]
+    #     AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/scan_psc_rings_split'+psf_tag, A=A, 
+    #         extra_dict={'radius':r_bins,'raw_values':raw_values, 'raw_values_unc':raw_values_unc})
 
 def AnalyzeMixture(basedir, galprop_tag, A, analysis, Pi0_Brems_PEB, Pi0_Brems_GAL):
     if analysis == 6:
@@ -775,12 +1087,10 @@ def AnalyzeMixture(basedir, galprop_tag, A, analysis, Pi0_Brems_PEB, Pi0_Brems_G
             #--------------------------------------------
             # GCE Fit
             A.ResetFit()    
-            A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.25, 
+            A.AddDMTemplate(profile='NFW', limits=[None,None], decay=False, gamma=1.05, 
                            r_s=20.0, axesratio=1, offset=(0, 0), spec_file=None,)
             A.RunLikelihood(print_level=1, tol=2e2, precision=None, minos=True)[0]
             AddFitMetadata(basedir +'/'+ galprop_tag+'.hdf5', h5_path='/fit_results/galprop_frac_%1.2f/'%GalpropFrac, A=A, extra_dict=None) 
-
-
 
 
 
@@ -790,6 +1100,7 @@ if __name__ == "__main__":
     basedir, galprop_tag, analysis = sys.argv[1:4]
 
     psf=-1
+    split_plane=False
     if len(sys.argv)>4:
         if 'PSF=0' in sys.argv[4:]:
             psf=0
@@ -799,6 +1110,9 @@ if __name__ == "__main__":
             psf=2
         if 'PSF=3' in sys.argv[4:]:
             psf=3
+
+        if 'split_plane=1' in sys.argv[4:]:
+            split_plane = True
         
 
     if int(analysis) == 6:
@@ -815,14 +1129,8 @@ if __name__ == "__main__":
     if analysis==9 :
         A = LoadModel(basedir,galprop_tag, AQ_templates=True)
     else: 
-        A = LoadModel(basedir,galprop_tag, AQ_templates=False, psf=psf)
+        A = LoadModel(basedir,galprop_tag, AQ_templates=False, psf=psf, split_plane=split_plane)
     Analyze(basedir,galprop_tag, A, int(analysis), psf=psf)
-
-
-
-
-
-    
 
     #A.ResetFit()
 

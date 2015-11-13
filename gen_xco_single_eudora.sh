@@ -3,10 +3,12 @@
 
 cd /pfs/carlson/GCE_sys/
 python /pfs/carlson/GCE_sys/GenDiffuseModel_X_CO_3zone_P8R2.py /pfs/carlson/galprop/output $1 /pfs/carlson/galprop/GALDEF
-python /pfs/carlson/GCE_sys/RunAnalysis_P8.py /pfs/carlson/galprop/output "$1"_XCO_P8 0
+#python /pfs/carlson/GCE_sys/RunAnalysis_P8.py /pfs/carlson/galprop/output "$1"_XCO_P8 0
 cd /pfs/carlson/galprop/output/
-python strip_single.py "$1"_XCO_P8 0 
-scp "$1"_XCO_P8_stripped.hdf5 planck:/data/GCE_sys/new
+#python strip_single.py "$1"_XCO_P8 0 
+#scp "$1"_XCO_P8_stripped.hdf5 planck:/data/GCE_sys/new
+
+scp "$1"_XCO_P8_corrected.hdf5 eric@chasm.mps.ohio-state.edu:/adata/eric/
 
 
 #python /pfs/carlson/GCE_sys/GenDiffuseModel_X_CO_3zone_P8R2_PSF3.py /pfs/carlson/galprop/output $1 /pfs/carlson/galprop/GALDEF

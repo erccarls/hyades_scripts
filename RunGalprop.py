@@ -1109,26 +1109,26 @@ for sf in [3,]:
 
 
 
-# # -----------------------------------------------------
-# # Gen Set of Models
-# # -----------------------------------------------------
+# -----------------------------------------------------
+# Gen Set of Models
+# -----------------------------------------------------
 # count = 0
 # prefix = 'mod_n_'
 
-# for kennicutt_threshold in np.logspace(-2, 2, 21):
-#         GenGaldef(
-#              filename=prefix+str(count),   # filename for output files and for galdef suffix
-#              HIModel=1,
-#              H2Model=1,  
-#              spiral_fraction = 0.20, 
-#              kennicutt_index = 1.5, 
-#              kennicutt_threshold = kennicutt_threshold, 
-#              H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-#              HI_filename = 'HI_Pohl_galprop_8500.fits',  
-#              H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-#              HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-#         )
-#         count+=1
+# for kennicutt_threshold in np.logspace(-2, 1, 13):
+#        GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=1,
+#             H2Model=1,  
+#             spiral_fraction = 0.25, 
+#             kennicutt_index = 1.5, 
+#             kennicutt_threshold = kennicutt_threshold, 
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#        )
+#        count+=1
 
 
 
@@ -1335,28 +1335,53 @@ for sf in [3,]:
 # # -----------------------------------------------------
 # # Updated XCO values
 # # -----------------------------------------------------
-# count = 0
-# prefix = 'mod_s_'
-# for HIModel,H2Model in [(2,2),(1,1)]:
+count = 0
+prefix = 'mod_s_'
+for HIModel,H2Model in [(2,2),(1,1)]:
     
-#     print HIModel, H2Model
+    print HIModel, H2Model
 
-#     for kennicutt_index in np.linspace(1.,1.75,4):
-#         for spiral_fraction in np.linspace(0,.3,7):
+    for kennicutt_index in np.linspace(1.,1.75,4):
+        for spiral_fraction in np.linspace(0,.3,7):
+            GenGaldef(
+                filename=prefix+str(count),   # filename for output files and for galdef suffix
+                HIModel=HIModel,
+                H2Model=H2Model,  
+                spiral_fraction=spiral_fraction,
+                kennicutt_index=kennicutt_index,
+                kennicutt_threshold = .1, 
+                H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+                HI_filename = 'HI_Pohl_galprop_8500.fits',  
+                H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+                HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+                n_XCO = 3,
+                start_skip=41,
+                stop_skip=49,
+            )
+            count+=1
+
+
+# count = 0
+# prefix = 'mod_srcdist_'
+# for HIModel,H2Model in [(1,1),]:
+#     print HIModel, H2Model
+#     for primary_source in ('Lorimer','SNR','OB','Yusifov'):
+#         for spiral_fraction in np.linspace(0,.3,4):
 #             GenGaldef(
 #                 filename=prefix+str(count),   # filename for output files and for galdef suffix
 #                 HIModel=HIModel,
 #                 H2Model=H2Model,  
 #                 spiral_fraction=spiral_fraction,
-#                 kennicutt_index=kennicutt_index,
-#                 kennicutt_threshold = .1, 
+#                 kennicutt_index=1.5,
+#                 kennicutt_threshold = .1,
+#                 cr_source = primary_source, 
 #                 H2_filename = 'CO_PEB_galprop_8500.fits.gz',
 #                 HI_filename = 'HI_Pohl_galprop_8500.fits',  
 #                 H2_filename_rlb='CO_Pohl_8500_rlb.fits',
 #                 HI_filename_rlb='HI_Pohl_8500_rlb.fits',
 #                 n_XCO = 3,
-#                 start_skip=16,
-#                 stop_skip=18,
+#                 start_skip=-1,
+#                 stop_skip=100,
 #             )
 #             count+=1
 
@@ -1512,7 +1537,7 @@ for sf in [3,]:
 # count = 0
 # prefix = 'mod_v_'
 
-# for spike_norm in np.logspace(0, 3,16):
+# for spike_norm in np.logspace(1, 3,11):
 #     GenGaldef(
 #         filename=prefix+str(count),
 #         HIModel=1, # 1=galprop classic, 2=3D cube NS,  3=3D F07 <1.5 kpc

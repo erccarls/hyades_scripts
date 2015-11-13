@@ -214,7 +214,6 @@ def RunFit(A, nrings=9, limit_inner=None, fix_xco=False, tag='', output_loglike=
         loglike += A.psc_weights*A.mask*(model-A.binned_data*np.log(model))
 
 
-
     #-------------------------------------------------------------------
     # Now we fit the inner galaxy X_CO.
     if fix_xco is False:
@@ -325,12 +324,12 @@ def WriteHDF5(fname, basedir, tag, m , nrings=9, fix_xco=False):
             else: 
                 brem[...] += m.values['pi0HIHII']*1.25*X_CO[i_ring-1]*ReadFits(basedir+'/bremss_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
             
-            if i_ring == 1:
-                pi0_0[...] += pi0
-                brem_0[...] += brem
+            if i_ring == 1 :
+                pi0_0[...] += ReadFits(basedir+'/pi0_decay_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
+                brem_0[...] += ReadFits(basedir+'/bremss_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
             if i_ring == 2:
-                pi0_1[...] += pi0
-                brem_1[...] += brem
+                pi0_1[...] += ReadFits(basedir+'/pi0_decay_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
+                brem_1[...] +=  ReadFits(basedir+'/bremss_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
 
         print 'Adding ICS'
         ics_opt[...] += m.values['ics']*ReadFits(basedir+'/ics_isotropic_comp_1_healpix_54_'+tag+'.gz', len(energies)).clip(0)
@@ -349,12 +348,12 @@ def WriteHDF5(fname, basedir, tag, m , nrings=9, fix_xco=False):
             brem[...] += ReadFits(basedir+'/bremss_HII_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
             brem[...] += ReadFits(basedir+'/bremss_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
 
-            if i_ring == 1:
-                pi0_0[...] += pi0
-                brem_0[...] += brem
+            if i_ring == 1 :
+                pi0_0[...] += ReadFits(basedir+'/pi0_decay_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
+                brem_0[...] += ReadFits(basedir+'/bremss_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
             if i_ring == 2:
-                pi0_1[...] += pi0
-                brem_1[...] += brem
+                pi0_1[...] += ReadFits(basedir+'/pi0_decay_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
+                brem_1[...] +=  ReadFits(basedir+'/bremss_H2R_ring_'+str(i_ring)+'_healpix_54_'+tag+'.gz', len(energies)).clip(0)
 
         print 'Adding ICS'
         ics_opt[...] += ReadFits(basedir+'/ics_isotropic_comp_1_healpix_54_'+tag+'.gz', len(energies)).clip(0)
@@ -441,15 +440,13 @@ except:pass
 
 if __name__ == "__main__":
 
-
-
     if (len(sys.argv) not in [4,5,6]) : 
         raise("Incorrect number of args: <galprop output dir> <galprop tag> <galdef dir> [limit_inner] [fix_xco]")
     
     basedir, tag, galdefdir, = sys.argv[1:4]
     
-    fname = basedir+'/'+tag+'_XCO_P8.hdf5'
-    #fname = basedir+'/'+tag+'_XCO_P8_corrected.hdf5'
+    #fname = basedir+'/'+tag+'_XCO_P8.hdf5'
+    fname = basedir+'/'+tag+'_XCO_P8_corrected.hdf5'
     #fname = basedir+'/'+tag+'_XCO_P8_MS04.hdf5'
 
     limit_inner=None
@@ -460,8 +457,8 @@ if __name__ == "__main__":
 
     fix_xco = False
     if len(sys.argv) == 6:
-        if sys.argv[5] == '0':
-            fix_xco == True
+        if sys.argv[5] == '1':
+            fix_xco = True
     print 'limit_inner:', limit_inner
     print 'fix_xco:', fix_xco
 
