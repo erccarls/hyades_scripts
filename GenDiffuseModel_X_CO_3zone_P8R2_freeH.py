@@ -505,7 +505,8 @@ if __name__ == "__main__":
     #--------------------------------------------------------------------
     # Run the analysis
     A = GenDiffuse(A, basedir=basedir, tag=tag, verbosity=1, nrings=9, fix_xco=fix_xco)
-    m, fval, res = RunFit(A, nrings=9, limit_inner=limit_inner, fix_xco=fix_xco, output_loglike=True, tag=tag)
+    m, fval, res = RunFit(A, nrings=9, limit_inner=limit_inner, fix_xco=fix_xco, output_loglike=True, 
+        tag=tag+"_XCO_P8_corrected_freeH")
 
     #m, fval, res = RunFit(A, nrings=9, limit_inner=limit_inner, fix_xco=fix_xco, tag=tag, output_loglike=True)
 

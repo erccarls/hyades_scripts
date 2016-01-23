@@ -408,6 +408,7 @@ def AddMetadata(fname, basedir, tag, A, m, fval=None, fix_xco=False):
 
         if fix_xco is False:
             vals = np.array([m.values['pi0_H2_'+str(i)] for i in range(1,10)])
+            #vals_HIH2 = np.array([m.values['pi0HIHII_'+str(i)] for i in range(1,10)])
         else: 
             vals = np.ones(9)
 
@@ -422,6 +423,7 @@ def AddMetadata(fname, basedir, tag, A, m, fval=None, fix_xco=False):
             fa.create('innerfval', fval[2])            
 
         fa.create('global_XCO', vals)
+        #fa.create('global_XHIHII', vals_HIH2)
         fa.create('globale_bins', A.bin_edges)
         fa.create('globalirf', A.irf)
         fa.create('globalevclass', A.evclass)
@@ -493,9 +495,8 @@ if __name__ == "__main__":
     #--------------------------------------------------------------------
     # Run the analysis
     A = GenDiffuse(A, basedir=basedir, tag=tag, verbosity=1, nrings=9, fix_xco=fix_xco)
-    m, fval, res = RunFit(A, nrings=9, limit_inner=limit_inner, fix_xco=fix_xco)
-
-    #m, fval, res = RunFit(A, nrings=9, limit_inner=limit_inner, fix_xco=fix_xco, tag=tag, output_loglike=True)
+    #m, fval, res = RunFit(A, nrings=9, limit_inner=limit_inner, fix_xco=fix_xco)
+    m, fval, res = RunFit(A, nrings=9, limit_inner=limit_inner, fix_xco=fix_xco, tag=tag+"_XCO_P8_corrected", output_loglike=True)
 
     WriteHDF5(fname=fname, basedir=basedir, tag=tag, m=m, nrings=9, fix_xco=fix_xco)
     AddMetadata(fname,basedir=galdefdir, tag=tag, A=A, m=m, fval=fval, fix_xco=fix_xco)

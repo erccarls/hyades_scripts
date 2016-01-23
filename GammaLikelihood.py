@@ -13,7 +13,7 @@ import imp
 import copy
 
 def RunLikelihood(analysis, print_level=0, use_basinhopping=False, start_fresh=False, niter_success=30, tol=100000.,
-                  precision=1e-14, error=0.1, force_cpu=False):
+                  precision=1e-14, error=0.1, force_cpu=False, statistic='Poisson', clip_model=False):
     """
     Calculates the maximum likelihood set of parameters given an Analyis object (see analysis.py).
 
@@ -25,6 +25,8 @@ def RunLikelihood(analysis, print_level=0, use_basinhopping=False, start_fresh=F
     :param tol: EDM Tolerance for migrad convergence.
     :param precision: Migrad internal precision override.
     :param error: Migrad initial param error to use.
+    :param statistic: 'Poisson' is only one supprted now
+    :param clip_model: If true, negative values of the model are converted to a very small number to help convergence.
     :returns (m, res):
             m: iminuit result object\n
             res: scipy.minimize result.  None if use_basinhopping==False
@@ -161,13 +163,27 @@ def RunLikelihood(analysis, print_level=0, use_basinhopping=False, start_fresh=F
     f.write("""
 import numpy as np 
 import time 
+# import theano
+# import theano.tensor as T
+# from theano import function
+# import theano
+import os
 
 class like():
-    def __init__(self, templateList, data, psc_weights, force_cpu):
+    def __init__(self, templateList, data, psc_weights, force_cpu, statistic='Poisson', clip_model=False):
+        # Configure Theano 
+        # os.environ['THEANO_FLAGS'] = os.environ.get('THEANO_FLAGS', '') + ',openmp=true'
+        # os.environ['OMP_NUM_THREADS'] = '12'
+        # theano.config.openmp =True
+        # theano.config.openmp_elemwise_minsize = 100000000
+
         self.templateList = templateList
         self.data = data
         self.use_cuda = True
         self.psc_weights = psc_weights
+        self.counts = 0
+        self.statistic = statistic
+        self.clip_model = clip_model
         try:
             import cudamat as cm
             self.cm = cm
@@ -177,6 +193,12 @@ class like():
             self.cm_psc_weights = cm.CUDAMatrix(psc_weights)
         except:
             self.use_cuda = False
+            # Theano Specific
+            # data = T.dmatrix('data')
+            # model = T.dmatrix('model')
+            # psc_weights = T.dmatrix('psc_weights')
+            # result = T.sum(psc_weights*(model-data*T.log(model)))
+            # self.eval = function([data,model,psc_weights], result)
 
         if force_cpu:
             self.use_cuda = False
@@ -185,16 +207,42 @@ class like():
 
     def f(self,"""+args+"""):
         # init model array 
+        # start = time.time()
         model = np.zeros(shape=self.templateList[self.templateList.keys()[0]].healpixCubeMasked.shape)
         # sum the models 
 """ + master_model +"""
 """ + extConstraint + """
 
+        if self.clip_model:
+            model = model.clip(1e-10, 1e50)
+        # print 'addition', time.time()-start
+
         #------------------------------------------------
         # Uncomment this for CPU mode (~10 times slower than GPU depending on array size)
         if self.use_cuda == False:
-            neg_loglikelihood = np.sum(self.psc_weights*(model-self.data*np.log(model)))
-        
+            # start = time.time()
+            # neg_loglikelihood = np.sum(self.psc_weights*(model-self.data*np.log(model)))
+            # print 'like_eval_numpy', time.time()-start
+
+            # For Theano instead of numpy
+            # start = time.time()
+            # neg_loglikelihood = self.eval(self.data, model, self.psc_weights) 
+            # print 'like_eval_theano', time.time()-start
+
+            if self.statistic=='Gaussian':
+                diff = (model-self.data)
+                sigma = np.sqrt(self.data)
+                sigma[sigma==0] = 0.0001
+
+                neg_loglikelihood = -np.sum(self.psc_weights*(
+                                                            np.log(np.sqrt(2*np.pi)*sigma)
+                                                            -(diff*diff)/(2*sigma*sigma)
+                                                            ))
+            else:
+                neg_loglikelihood = np.sum(self.psc_weights*(model-self.data*np.log(model)))
+
+
+
         #------------------------------------------------
         # Uncomment here for GPU mode using CUDA + cudamat libraries
         else:
@@ -203,8 +251,9 @@ class like():
             self.cm.cublas_init()
             neg_loglikelihood = cmModel_orig.subtract(self.cm.log(cmModel).mult(self.cmData)).mult(self.cm_psc_weights).sum(axis=0).sum(axis=1).asarray()[0,0]
 
-        #if self.ncall%500==0: print self.ncall, neg_loglikelihood
-        #self.ncall+=1
+        if self.ncall%5==0: 
+            print "\\r","ncall/-LL", self.ncall, neg_loglikelihood,
+        self.ncall+=1
 
         return neg_loglikelihood + chi2_ext/2.
         
@@ -231,6 +280,7 @@ class like():
     #---------------------------------------------------------------------------
     # Now load the source 
     foo = imp.load_source('tmplike', f.name)
+
     if print_level > 0:
         print "Code generation completed in", "{:10.4e}".format(time.time()-start), 's'
         try:
@@ -240,14 +290,15 @@ class like():
             print "Fallback to CPU mode.  (Failed to import cudamat libraries.)"
 
     start = time.time()
-    like = foo.like(analysis.templateList, masked_data, analysis.psc_weights[:, mask_idx].astype(np.float32), force_cpu)
+    like = foo.like(analysis.templateList, masked_data, analysis.psc_weights[:, mask_idx].astype(np.float32), 
+                    force_cpu, statistic, clip_model)
 
     # Init migrad
     m = Minuit(like.f, **kwargs)
     m.tol = tol  # TODO: why does m.tol need to be so big to converge when errors are very small????
     #m.migrad(ncall=200000, precision=1e-15)
     if not start_fresh:
-        m.migrad(precision=precision, ncall=20000)
+        m.migrad(ncall=1e4,)#, precision=precision)
 
     #m.minos(maxcall=10000,sigma=2.)
 
@@ -263,7 +314,7 @@ class like():
             disp = True
         else:
             disp = False
-        res = basinhopping(like.f2, x0, niter=2000, disp=disp,
+        res = basinhopping(like.f2, x0, niter=20000, disp=disp,
                            stepsize=.1, minimizer_kwargs={'bounds': bounds}, niter_success=niter_success)
 
         # Can also try pswarm method.
@@ -290,7 +341,8 @@ class like():
 
 
 def RunLikelihoodBinByBin(bin, analysis, print_level=0, use_basinhopping=False, start_fresh=False, niter_success=30,
-                          tol=100000., precision=1e-14, error=0.1, ignoreError=False):
+                          tol=100000., precision=1e-14, error=0.1, ignoreError=False , statistic='Poisson', 
+                          clip_model=False):
     """
     Calculates the maximum likelihood set of parameters given an Analyis object (see analysis.py). Similar to
     RunLikelihood, but runs each energy bin independently (For cases where each Ebin is decoupled in the fit).
@@ -305,6 +357,8 @@ def RunLikelihoodBinByBin(bin, analysis, print_level=0, use_basinhopping=False, 
     :param tol: EDM Tolerance for migrad convergence.
     :param precision: Migrad internal precision override.
     :param error: Migrad initial param error to use.
+    :param statistic: 'Poisson' is only one supprted now. 'Gaussian' does not work correctly yet.
+    :param clip_model: If true, negative values of the model are converted to a very small number to help convergence.
     :returns m: iminuit result object\n
     """
 
@@ -414,11 +468,13 @@ import numpy as np
 import time
 
 class like():
-    def __init__(self, templateList, data, psc_weights):
+    def __init__(self, templateList, data, psc_weights, statistic='Poisson', clip_model=False):
         self.templateList = templateList
         self.data = data
         self.use_cuda = True
         self.psc_weights = psc_weights
+        self.statistic = statistic
+        self.clip_model = clip_model
         try:
             import cudamat as cm
             self.cm = cm
@@ -434,6 +490,10 @@ class like():
         # init model array
         #model = np.zeros(shape=(1, self.templateList[self.templateList.keys()[0]].healpixCubeMasked.shape[1]))
         model = np.zeros(shape=self.data.shape)
+
+        if self.clip_model:
+            model = model.clip(1e-10,1e50)
+
         # sum the models
 """ + model +"""
 """ + extConstraint + """
@@ -442,8 +502,20 @@ class like():
         # Uncomment this for CPU mode (~10 times slower than GPU depending on array size)
         self.use_cuda=False
         if self.use_cuda == False:
+            if self.statistic=='Gaussian':
+                diff = (model-self.data)
+                sigma = np.sqrt(self.data)
+                sigma[sigma==0] = 0.0001
 
-            neg_loglikelihood = np.sum(self.psc_weights*(model-self.data*np.log(model)))
+                neg_loglikelihood = -np.sum(self.psc_weights*(
+                                                            np.log(np.sqrt(2*np.pi)*sigma)
+                                                            -(diff*diff)/(2*sigma*sigma)
+                                                            ))
+            else:
+                neg_loglikelihood = np.sum(self.psc_weights*(model-self.data*np.log(model)))
+
+
+
 
         #------------------------------------------------
         # Uncomment here for GPU mode using CUDA + cudamat libraries
@@ -496,7 +568,8 @@ class like():
     #                 np.array([analysis.psc_weights[bin, mask_idx].astype(np.float32), ]))
     like = foo.like(templateList,
                     np.array(masked_data[bin]),
-                    np.array(analysis.psc_weights[bin, mask_idx].astype(np.float32)))
+                    np.array(analysis.psc_weights[bin, mask_idx].astype(np.float32)),
+                    statistic, clip_model)
 
 
     # print analysis.templateList['DM'].healpixCube[0].shape
@@ -514,7 +587,7 @@ class like():
     # Init migrad
     m = Minuit(like.f, **kwargs)
     m.tol = tol  # TODO: why does m.tol need to be so big to converge when errors are very small????
-    m.migrad(ncall=2500, precision=precision)
+    m.migrad(ncall=2500)#, precision=precision)
 
     #m.minos(maxcall=10000,sigma=2.)
 

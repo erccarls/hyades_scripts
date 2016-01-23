@@ -1,6 +1,6 @@
 # for i_model in {42,46}
 # do
-# 	#for i_analysis in {0,15,16,19,20,21}
+# 	#for i_analysis in {33,15,16,19,20,21}
 # 	for i_analysis in {19,}
 # 	do
 # 		for i_psf in {-1..3}
@@ -60,47 +60,48 @@
 # Hyades runs
 
 #for i_model in {28..55}
-# for i_model in {42..48}
-# do
-# 	for i_analysis in {0,}
-# 	#for i_analysis in {3,5,7,8,10,}
-# 	#for i_analysis in {22,23}
-# 	do
-# 		for i_psf in {-1,}
-# 		do	
-# 			cat <<EOS | qsub -V -q normal -S /bin/bash -N analysis_"$i_analysis" -l nodes=1:ppn=1,walltime=24:00:00 - 
-# 			export OMP_NUM_THREADS=1
-# 			cd /pfs/carlson/GCE_sys/
-# 			python RunAnalysis_P8.py /pfs/carlson/galprop/output/ mod_s_"$i_model"_XCO_P8_corrected "$i_analysis" 0 PSF="$i_psf" 
-# 			#python RunAnalysis_P8.py /pfs/carlson/galprop/output/ mod_s_"$i_model"_XCO_P8_corrected 0 0 PSF=-3 
-# EOS
-
-# 		done
-# 	done
-# done
-
-
-
-#---------------------------
-# Hyades mod_n!!!!
-
 for i_model in {42..48}
 do
-	for i_analysis in {0, 24,}
+	#for i_analysis in {3,5,7,8,10,14,22,23,24,30,31,32,33}
 	#for i_analysis in {3,5,7,8,10,}
-	#for i_analysis in {22,23}
+	for i_analysis in {34,}
 	do
-		for i_psf in {-1,}
+		for i_psf in {-1,3}
 		do	
-			cat <<EOS | qsub -V -q normal -S /bin/bash -N analysis_"$i_analysis" -l nodes=1:ppn=1,walltime=6:00:00 - 
+			cat <<EOS | qsub -V -q normal -S /bin/bash -N analysis_"$i_analysis" -l nodes=1:ppn=1,walltime=24:00:00 - 
 			export OMP_NUM_THREADS=1
 			cd /pfs/carlson/GCE_sys/
-			python RunAnalysis_P8.py /pfs/carlson/galprop/output/ mod_s_"$i_model"_XCO_P8_corrected_freeH "$i_analysis" 0 PSF="$i_psf" 
+			python RunAnalysis_P8.py /pfs/carlson/galprop/output/ mod_s_"$i_model"_XCO_P8_corrected "$i_analysis" 0 PSF="$i_psf" 
+			#python RunAnalysis_P8_HR.py /pfs/carlson/galprop/output/ mod_s_"$i_model"_XCO_P8_corrected "$i_analysis" 0 PSF=-1 
 EOS
 
 		done
 	done
 done
+
+
+
+# #---------------------------
+# # Hyades mod_n!!!!
+
+# for i_model in {0..21}
+# do
+# 	for i_analysis in {0..0}
+# 	#for i_analysis in {3,5,7,8,10,}
+# 	#for i_analysis in {22,23}
+# 	do
+# 		for i_psf in {-1..-1}
+# 		do	
+# 			cat <<EOS | qsub -V -q normal -S /bin/bash -N analysis_"$i_analysis" -l nodes=1:ppn=2,walltime=6:00:00 - 
+# 			export OMP_NUM_THREADS=2
+# 			cd /pfs/carlson/GCE_sys/
+# 			python RunAnalysis_P8.py /pfs/carlson/galprop/output/ mod_v_"$i_model"_XCO_P8_corrected "$i_analysis" 0 PSF="$i_psf" 
+# 			#python RunAnalysis_P8.py /pfs/carlson/galprop/output/ mod_s_"$i_model"_XCO_P8_corrected_freeH "$i_analysis" 0 PSF="$i_psf" 
+# EOS
+
+# 		done
+# 	done
+# done
 
 
 

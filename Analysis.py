@@ -263,11 +263,11 @@ class Analysis():
             start_angle+=360
 
         if stop_angle<start_angle:
-            mask[(r>r1) & (r<r2) & (np.abs(b)>plane_mask) & (start_angle <= (angle_of_pixel+180)) & ( (angle_of_pixel+180) <= 360)] = 1 # Unmask the annulus
-            mask[(r>r1) & (r<r2) & (np.abs(b)>plane_mask) & (0 <= (angle_of_pixel+180)) & ( (angle_of_pixel+180) <= stop_angle)] = 1 # Unmask the annulus
+            mask[(r>r1) & (r<r2) & (np.abs(b)>=plane_mask) & (start_angle <= (angle_of_pixel+180)) & ( (angle_of_pixel+180) <= 360)] = 1 # Unmask the annulus
+            mask[(r>r1) & (r<r2) & (np.abs(b)>=plane_mask) & (0 <= (angle_of_pixel+180)) & ( (angle_of_pixel+180) <= stop_angle)] = 1 # Unmask the annulus
 
         else:
-            mask[(r>r1) & (r<r2) & (np.abs(b)>plane_mask) & (start_angle <= (angle_of_pixel+180)) & ( (angle_of_pixel+180) <= stop_angle)] = 1 # Unmask the annulus
+            mask[(r>r1) & (r<r2) & (np.abs(b)>=plane_mask) & (start_angle <= (angle_of_pixel+180)) & ( (angle_of_pixel+180) <= stop_angle)] = 1 # Unmask the annulus
 
         if merge is True:
             self.mask = (self.mask.astype(np.int32) | mask.astype(np.int32))
@@ -454,7 +454,8 @@ class Analysis():
                          ApplyIRF=False, sourceClass='PSC', multiplier=multiplier)
 
 
-    def GenPointSourceTemplate(self, pscmap=None, onlyidx=None, save=False, verbosity=1, ignore_ext=True):
+    def GenPointSourceTemplate(self, pscmap=None, onlyidx=None, save=False, verbosity=1, ignore_ext=True,
+                                l_range=(-180, 180), b_range=(-90, 90)):
         """
         Generates a point source count map valid for the current analysis based on 2fgl catalog.  This can take a long
         time so it is usually done once and then saved.
@@ -467,7 +468,7 @@ class Analysis():
         if (pscmap is None) and (save is True):
             pscmap = self.basepath + '/PSC_' + self.tag + '.npy'
 
-        total_map = SourceMap.GenSourceMap(self.bin_edges, l_range=(-180, 180), b_range=(-90, 90),
+        total_map = SourceMap.GenSourceMap(self.bin_edges, l_range=l_range, b_range=b_range,
                                            fglpath=self.fglpath,
                                            expcube=self.expCube,
                                            psffile=self.psfFile,
@@ -592,7 +593,7 @@ class Analysis():
                          fixNorm=fixNorm, limits=[None, None], value=1, ApplyIRF=True, sourceClass='ISO', valueUnc=valueUnc)
 
     def AddDMTemplate(self, profile='NFW', decay=False, gamma=1, axesratio=1, offset=(0, 0), r_s=20.,
-                      spec_file=None, limits=[None, None]):
+                      spec_file=None, limits=[None, None],size=60.):
         """
         Generates a dark matter template and adds it to the current template stack.
 
@@ -614,7 +615,7 @@ class Analysis():
         # Generate the DM template.  This gives units in J-fact so we divide by something reasonable for the fit.
         # Say the max value.
         tmp = DM.GenNFW(nside=self.nside, profile=profile, decay=decay, gamma=gamma, axesratio=axesratio, rotation=0.,
-                        offset=offset, r_s=r_s, mult_solid_ang=True)
+                        offset=offset, r_s=r_s, mult_solid_ang=True,size=size)
 
         self.jfactor = np.sum(tmp*self.mask)
 
@@ -944,7 +945,7 @@ class Analysis():
 
 
     def RunLikelihood(self, print_level=0, use_basinhopping=False, start_fresh=False, niter_success=50, tol=1e2,
-                      precision=None, error=0.1, minos=True, force_cpu=False):
+                      precision=None, error=0.1, minos=True, force_cpu=False, statistic='Poisson', clip_model=False):
         """
         Runs the likelihood analysis on the current templateList.
 
@@ -956,6 +957,10 @@ class Analysis():
         :param precision: Migrad internal precision override.
         :param error: Migrad initial param error to use.
         :param minos: If true, runs minos to determine fitting errors. False uses Hesse method.
+        :param statistic: 'Poisson' is only one supprted now. 'Gaussian' does not work correctly yet.
+        :param clip_model: If true, negative values of the model are converted to a very small number to help convergence. 
+                           This *is* unphysical so results should be double checked. 
+        
         :returns m, res: m is an iMinuit object and res is a scipy minimization object.
         """
 
@@ -994,7 +999,8 @@ class Analysis():
         # Otherwise, Run the bin-by-bin fit.
         else:
             results = [GammaLikelihood.RunLikelihoodBinByBin(bin=i, analysis=self, print_level=print_level,
-                                                             error=error, precision=precision, tol=tol)
+                                                             error=error, precision=precision, tol=tol,
+                                                             statistic=statistic, clip_model=clip_model)
                        for i in range(self.n_bins)]
 
 
@@ -1008,14 +1014,16 @@ class Analysis():
                         t.limits = [-10,10]                        
                     
                     results[i_E] = GammaLikelihood.RunLikelihoodBinByBin(bin=i_E, analysis=self, print_level=print_level,
-                                                                         error=error, precision=precision, tol=tol)
+                                                                         error=error, precision=precision, tol=tol,
+                                                                         statistic=statistic, clip_model=clip_model)
                 
-                if results[i_E].get_fmin().is_valid is False:
-                    print "Warning: Bin", i_E, 'fit did not converge. Trying with lower limit at 0,10'
-                    for key, t in self.templateList.items():
-                        t.limits = [0,10]
-                    results[i_E] = GammaLikelihood.RunLikelihoodBinByBin(bin=i_E, analysis=self, print_level=print_level,
-                                                                         error=error, precision=precision, tol=tol)
+                # if results[i_E].get_fmin().is_valid is False:
+                #     print "Warning: Bin", i_E, 'fit did not converge. Trying with lower limit at 0,10'
+                #     for key, t in self.templateList.items():
+                #         t.limits = [0,10]
+                #     results[i_E] = GammaLikelihood.RunLikelihoodBinByBin(bin=i_E, analysis=self, print_level=print_level,
+                #                                                          error=error, precision=precision, tol=tol,
+                #                                                          statistic=statistic)
 
 
 
@@ -1249,10 +1257,15 @@ class Analysis():
         :param fixSpectrum: If True, the spectrum is not allowed to float.
         """
 
-        # Load the template and spectrum
-        hdu = pyfits.open(template_file)
-        bub_idx = np.where(hdu[1].data['NAME'] == 'Whole bubble')
-        bubble = hdu[1].data['TEMPLATE'][bub_idx][0]
+        try:
+            # Load the template and spectrum
+            hdu = pyfits.open(template_file)
+            bub_idx = np.where(hdu[1].data['NAME'] == 'Whole bubble')
+            bubble = hdu[1].data['TEMPLATE'][bub_idx][0]
+        except: 
+            # The new bubble template
+            hdu = pyfits.open(template_file)
+            bubble = hdu[0].data
 
         # Resize template if need be.
         nside_in = int(np.sqrt(bubble.shape[0]/12))
@@ -1352,6 +1365,7 @@ class Analysis():
                                                l=l, b=b, expcube=self.expCube, subsamples=5, spectral_index=-2.25)
             print '\rGenerating exposure map %.2f' % ((float(i_E+1)/self.n_bins)*100.), "%",
         np.save('expmap_'+self.tag+'.npy', healpixcube)
+        self.expMap = healpixcube
 
 
     def CalculatePixelWeights(self, diffuse_model, psc_model, alpha_psc=5, f_psc=0.1):

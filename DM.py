@@ -131,12 +131,12 @@ def LOS_DM(l_max, b_max, res, z_step=0.02, func1='func = lambda x,y,z: 1.', func
 
 
 def GenNFW(nside=256, profile='NFW', decay=False, gamma=1, axesratio=1, rotation=0., offset=(0, 0), res=.125, size=60.,
-           fitsout=None, r_s=20., mult_solid_ang=False):
+           fitsout=None, r_s=20., mult_solid_ang=False, cartesian=False):
     """
     Generates a dark matter annihilation or decay skymap combined with instrumental and point source maps.
 
     :param nside: healpix nside.
-    :param profile: 'NFW', 'Ein', or 'Bur'
+    :param profile: 'NFW', 'Ein', 'Bur', 'Baryonic', or 'Iso'
     :param decay: If false, skymap is for annihilating dark matter
     :param gamma: Inner slope of DM profile for NFW.  Shape parameter for Einasto. Unused for Burk
     :param r_s: Scale factor
@@ -147,6 +147,7 @@ def GenNFW(nside=256, profile='NFW', decay=False, gamma=1, axesratio=1, rotation
     :param size: max dist in degrees from the GC before all values zero.
     :param fitsout: write fits file to this path
     :param mult_solid_ang: Mutiply pixels by there solid angle.
+    :param cartesian: output cartesian map instead of healpix
     :returns ndarray: A mask of DM convolved with XMM-Newton observations and point source maskes.\n
              Normalization is:\n
                 Integral_l.o.s. [ pho ] dz\n
@@ -197,6 +198,61 @@ def func(x,y,z):
     return r_s**3/((r+r_s)*(r*r+r_s*r_s))
     '''
 
+    # This is taken from arxiv: 1509.02166
+    Baryonic = '''
+import numpy as np
+
+r_DM, rho_DM = np.array([[  1.47644469e-01,   8.47861095e+00],
+       [  1.83846913e-01,   8.46988620e+00],
+       [  2.23943289e-01,   8.74097384e+00],
+       [  2.78897282e-01,   8.18358051e+00],
+       [  3.39750047e-01,   8.17600109e+00],
+       [  4.42092948e-01,   7.65305885e+00],
+       [  5.75309021e-01,   6.93496863e+00],
+       [  7.48724967e-01,   6.08372093e+00],
+       [  9.74489091e-01,   5.16665429e+00],
+       [  1.26823027e+00,   4.53246216e+00],
+       [  1.54566213e+00,   3.72755260e+00],
+       [  1.92614543e+00,   2.69234062e+00],
+       [  2.29728963e+00,   1.94502708e+00],
+       [  2.73994869e+00,   1.40514552e+00],
+       [  3.26689343e+00,   1.15572793e+00],
+       [  3.98246553e+00,   8.62365176e-01],
+       [  4.64680862e+00,   6.23062442e-01],
+       [  5.42113818e+00,   4.80331717e-01],
+       [  6.32449958e+00,   3.70297650e-01],
+       [  7.37782458e+00,   2.94879996e-01],
+       [  8.60790670e+00,   2.20074812e-01],
+       [  1.02665429e+01,   1.58988601e-01],
+       [  1.27947638e+01,   1.11169985e-01],
+       [  1.49291483e+01,   8.03207787e-02],
+       [  1.78058090e+01,   5.80261237e-02],
+       [  1.98845899e+01,   4.19327503e-02],
+       [  2.37124401e+01,   3.23234960e-02],
+       [  2.76680790e+01,   2.33538609e-02],
+       [  3.15808865e+01,   1.74312459e-02],
+       [  3.85101770e+01,   1.14241888e-02],
+       [  4.59377016e+01,   7.73484638e-03],
+       [  5.60127538e+01,   5.23640586e-03],
+       [  6.68057127e+01,   3.78293561e-03],
+       [  7.79500437e+01,   2.73318678e-03],
+       [  9.29772239e+01,   1.91152639e-03],
+       [  1.08495786e+02,   1.33701412e-03],
+       [  1.23887034e+02,   8.48559721e-04],
+       [  1.57891600e+02,   4.88372579e-04],
+       [  1.96880096e+02,   2.72132354e-04],
+       [  2.34925251e+02,   1.61833282e-04]]).T
+
+rho_DM_interp  = lambda r: np.exp(np.interp(np.log(r), np.log(r_DM), np.log(rho_DM)))
+
+def func(x,y,z):
+    r=np.sqrt(x*x+y*y+z*z)
+    return rho_DM_interp(r)
+
+    '''
+
+
+
     # Normalize Dark matter Profiles to the Solar Position (rho=0.4 GeV/cm^3 for r=8.5kpc )
     if profile == 'NFW':
         func += NFW
@@ -212,6 +268,9 @@ def func(x,y,z):
         func += '''
 func = lambda x,y,z: 1.
 '''
+    elif profile == 'Baryonic':
+        func += Baryonic
+        dm_norm = 0.4 / 0.22540632663301324
     else:
         raise Exception("DM Halo type not supported")
 
@@ -234,107 +293,110 @@ func = lambda x,y,z: 1.
     # Currently unsupported for hpix maps
     rotation = np.deg2rad(-rotation)
 
-    # Init healpix array and get the pixel sky locations
-    l, b = Tools.hpix2ang(np.arange(12*nside**2))
+    if cartesian is False:
 
-    # Get angular distance from Vincenty's formula for great circle
-    b, l = np.deg2rad((axesratio*(b-offset[1]), l-offset[0]))
+        # Init healpix array and get the pixel sky locations
+        l, b = Tools.hpix2ang(np.arange(12*nside**2))
 
-    out_of_bounds = np.where((b*axesratio > np.pi) | (b*axesratio < -np.pi))[0]
+        # Get angular distance from Vincenty's formula for great circle
+        b, l = np.deg2rad((axesratio*(b-offset[1]), l-offset[0]))
 
-    d = np.rad2deg(np.arctan2(np.sqrt(np.square(np.cos(b)*np.sin(l))+np.square(np.sin(b))), np.cos(b)*np.cos(l)))
-    solidAngle = healpy.pixelfunc.nside2pixarea(nside)
+        out_of_bounds = np.where((b*axesratio > np.pi) | (b*axesratio < -np.pi))[0]
 
-    # Evaluate DM integral at each point.
-    if mult_solid_ang:
-        hpix = dm_interp(d)*solidAngle
-        hpix[out_of_bounds]=0
+        d = np.rad2deg(np.arctan2(np.sqrt(np.square(np.cos(b)*np.sin(l))+np.square(np.sin(b))), np.cos(b)*np.cos(l)))
+        solidAngle = healpy.pixelfunc.nside2pixarea(nside)
+
+        # Evaluate DM integral at each point.
+        if mult_solid_ang:
+            hpix = dm_interp(d)*solidAngle
+            hpix[out_of_bounds]=0
+        else:
+            hpix = dm_interp(d)
+            hpix[out_of_bounds]=0
+
+        #########################################
+        # Write skymap to FITS File
+        #########################################
+        if fitsout is not None:
+            header = {'PROFILE': (profile, ''),
+                      'DECAY': (decay, 'True=decay, False=annihilating'),
+                      'GAMMA': (gamma, 'inner slope '),
+                      'AXESRAT': (axesratio, 'Axes ratio of projected DM profile'),
+                      'ROT': (rotation, 'Rotation angle of DM profile in degrees from +l toward +b'),
+                      'OFFLON': (offset[0], 'LON offset of DM profile center'),
+                      'OFFLAT': (offset[1], 'LAT offset of DM profile center'),
+                      'COMMENT1': 'Skymap generated by GammaLike.DM (erccarls@ucsc.edu) 2014',
+                      'COMMENT2': 'Normalization: (spherical) DM density=0.4 GeV/cm^3 at R_solar=8.5',
+            }
+
+            hdu = pyfits.PrimaryHDU(hpix)
+            for key in header:
+                if 'COMMENT' not in key:
+                    hdu.header.update(key, header[key][0], header[key][1])
+                else:
+                    hdu.header.add_comment(header[key])
+
+            hdu.writeto(fitsout, clobber=True)
+
+        return hpix
+
     else:
-        hpix = dm_interp(d)
-        hpix[out_of_bounds]=0
+        # ------------------------------------------------------
+        # CARTESIAN MAP ROUTINES
+        # ------------------------------------------------------
 
-    #########################################
-    # Write skymap to FITS File
-    #########################################
-    if fitsout is not None:
-        header = {'PROFILE': (profile, ''),
-                  'DECAY': (decay, 'True=decay, False=annihilating'),
-                  'GAMMA': (gamma, 'inner slope '),
-                  'AXESRAT': (axesratio, 'Axes ratio of projected DM profile'),
-                  'ROT': (rotation, 'Rotation angle of DM profile in degrees from +l toward +b'),
-                  'OFFLON': (offset[0], 'LON offset of DM profile center'),
-                  'OFFLAT': (offset[1], 'LAT offset of DM profile center'),
-                  'COMMENT1': 'Skymap generated by GammaLike.DM (erccarls@ucsc.edu) 2014',
-                  'COMMENT2': 'Normalization: (spherical) DM density=0.4 GeV/cm^3 at R_solar=8.5',
-        }
-
-        hdu = pyfits.PrimaryHDU(hpix)
-        for key in header:
-            if 'COMMENT' not in key:
-                hdu.header.update(key, header[key][0], header[key][1])
-            else:
-                hdu.header.add_comment(header[key])
-
-        hdu.writeto(fitsout, clobber=True)
-
-    return hpix
-
-    #------------------------------------------------------
-    # CARTESIAN MAP ROUTINES
-    #------------------------------------------------------
-
-    # # Generate the skymap!
-    # skymap_dim = np.linspace(-size, size, 2 * size / res + 1)
-    # skymap = np.zeros(shape=(skymap_dim.shape[0] - 1, skymap_dim.shape[0] - 1))
-    # center_bin = 0.5 * (skymap_dim[1] - skymap_dim[0])
-    # for i in range(len(skymap_dim) - 1):
-    #     # Adjust for offset
-    #     x, y = skymap_dim[i] - offset[0] + center_bin, skymap_dim[:-1] - offset[1] + center_bin
-    #     # Rotate coordinates
-    #     x, y = x * np.cos(rotation) + y * np.sin(rotation), -x * np.sin(rotation) + y * np.cos(rotation)
-    #     # Evaluate the DM profile
-    #     r = np.sqrt((x / float(axesRatio)) ** 2. + y ** 2)
-    #     dm_contrib = dm_interp(r)
-    #
-    #     skymap[:, i] = dm_contrib
-    #
-    # if fitsout is not None:
-    #     #########################################
-    #     # Write skymap to FITS File
-    #     #########################################
-    #     header = {'NAXIS': (2, ''),
-    #               'NAXIS1': (int(1. / res) + 1, ''),
-    #               'CTYPE1': ('GLON---NCP', ''),
-    #               'CRVAL1': (0., ''),
-    #               'CRPIX1': (int(size / res) + 1 / 2., ''),
-    #               'CUNIT1': ('deg', ''),
-    #               'CDELT1': (res, ''),
-    #               'NAXIS2': (int(size / res) + 1, ''),
-    #               'CTYPE2': ('GLAT--NCP', ''),
-    #               'CRVAL2': (0., ''),
-    #               'CRPIX2': (int(size / res) + 1, ''),
-    #               'CUNIT2': ('deg', ''),
-    #               'CDELT2': (res, ''),
-    #               'PROFILE': (profile, ''),
-    #               'DECAY': (decay, 'True=decay, False=annihilating'),
-    #               'GAMMA': (gamma, 'inner slope '),
-    #               'AXESRAT': (axesRatio, 'Axis ratio of projected DM profile'),
-    #               'ROT': (rotation, 'Rotation angle of DM profile in degrees from +l toward +b'),
-    #               'OFFLON': (offset[0], 'LON offset of DM profile center'),
-    #               'OFFLAT': (offset[1], 'LAT offset of DM profile center'),
-    #               'COMMENT1': 'Skymap generated by GammaLike.DM (erccarls@ucsc.edu) 2014',
-    #               'COMMENT2': 'Normalization: (spherical) DM profile at .5 deg.=1 (before PSF)',
-    #               'COMMENT3': 'Then PSF is applied and map is multplied by ',
-    #               'COMMENT4': 'sum_i mask_i*GTI_i/Total_GTI'
-    #     }
-    #
-    #     hdu = pyfits.PrimaryHDU(skymap)
-    #     for key in header:
-    #         if 'COMMENT' not in key:
-    #             hdu.header.update(key, header[key][0], header[key][1])
-    #         else:
-    #             hdu.header.add_comment(header[key])
-    #
-    #     hdu.writeto(fitsout, clobber=True)
-    #
-    # return skymap
+        # Generate the skymap!
+        skymap_dim = np.linspace(-size, size, 2 * size / res + 1)
+        skymap = np.zeros(shape=(skymap_dim.shape[0] - 1, skymap_dim.shape[0] - 1))
+        center_bin = 0.5 * (skymap_dim[1] - skymap_dim[0])
+        for i in range(len(skymap_dim) - 1):
+            # Adjust for offset
+            x, y = skymap_dim[i] - offset[0] + center_bin, skymap_dim[:-1] - offset[1] + center_bin
+            # Rotate coordinates
+            x, y = x * np.cos(rotation) + y * np.sin(rotation), -x * np.sin(rotation) + y * np.cos(rotation)
+            # Evaluate the DM profile
+            r = np.sqrt((x / float(axesratio)) ** 2. + y ** 2)
+            dm_contrib = dm_interp(r)
+        
+            skymap[:, i] = dm_contrib
+        
+        if fitsout is not None:
+            #########################################
+            # Write skymap to FITS File
+            #########################################
+            header = {'NAXIS': (2, ''),
+                      'NAXIS1': (int(1. / res) + 1, ''),
+                      'CTYPE1': ('GLON---NCP', ''),
+                      'CRVAL1': (0., ''),
+                      'CRPIX1': (int(size / res) + 1 / 2., ''),
+                      'CUNIT1': ('deg', ''),
+                      'CDELT1': (res, ''),
+                      'NAXIS2': (int(size / res) + 1, ''),
+                      'CTYPE2': ('GLAT--NCP', ''),
+                      'CRVAL2': (0., ''),
+                      'CRPIX2': (int(size / res) + 1, ''),
+                      'CUNIT2': ('deg', ''),
+                      'CDELT2': (res, ''),
+                      'PROFILE': (profile, ''),
+                      'DECAY': (decay, 'True=decay, False=annihilating'),
+                      'GAMMA': (gamma, 'inner slope '),
+                      'AXESRAT': (axesRatio, 'Axis ratio of projected DM profile'),
+                      'ROT': (rotation, 'Rotation angle of DM profile in degrees from +l toward +b'),
+                      'OFFLON': (offset[0], 'LON offset of DM profile center'),
+                      'OFFLAT': (offset[1], 'LAT offset of DM profile center'),
+                      'COMMENT1': 'Skymap generated by GammaLike.DM (erccarls@ucsc.edu) 2014',
+                      'COMMENT2': 'Normalization: (spherical) DM profile at .5 deg.=1 (before PSF)',
+                      'COMMENT3': 'Then PSF is applied and map is multplied by ',
+                      'COMMENT4': 'sum_i mask_i*GTI_i/Total_GTI'
+            }
+        
+            hdu = pyfits.PrimaryHDU(skymap)
+            for key in header:
+                if 'COMMENT' not in key:
+                    hdu.header.update(key, header[key][0], header[key][1])
+                else:
+                    hdu.header.add_comment(header[key])
+        
+            hdu.writeto(fitsout, clobber=True)
+        
+        return skymap
