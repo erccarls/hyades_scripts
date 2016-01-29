@@ -19,12 +19,12 @@ cd ..//galprop/output/
 
 
 
-for i in {0..101}
+for i in {102..110}
 do
  	python strip_single.py mod_p_"$i"_XCO_P8_corrected 0
 done
 
-for i in {0..101}
+for i in {102..110}
 do
 	scp mod_p_"$i"_XCO_P8_corrected_stripped.hdf5 planck:/data/GCE_sys/new 
 done

@@ -8,8 +8,12 @@ def GenGaldef(
     n_spatial_dimensions=3, 
     dx=.5, # kpc for dx and dy propagation grid
     dz=.125, # kpc for dz propagation grid
-    zmax=3., # halo half-height 
+    zmax=3, # halo half-height 
     xmax=20,
+    xmax_inner=0, 
+    zmax_inner=0, 
+    dx_inner=.125,
+    dz_inner=.0625,  
     healpix_order=8,
     IC_isotropic=1,
     IC_anisotropic=0,
@@ -39,13 +43,15 @@ def GenGaldef(
     COR_filename = "rbands_co10mm_v2_2001_qdeg_9R_new.fits.gz",
     HIR_filename = "rbands_hi12_v2_qdeg_zmax1_Ts150_EBV_mag5_limit_9R_new.fits",
     cr_source = 'SNR',  # can be OB, Yusifov, Lorimer, or SNR
-    n_XCO = 9, 
+    n_XCO = 3, 
     N_e=.49e-9 , 
     N_p=4.8e-9 ,
     alpha_p=2.39,
+    alpha_p_inner=-100,
+    alpha_e_inner=-100,
     numProc=105,
     start_skip=-1,
-    stop_skip=150, # only run if filename is between start and stop
+    stop_skip=500, # only run if filename is between start and stop
     spike_norm=0,
     spike_sigma=.2,
     fix_xco=0,
@@ -183,17 +189,17 @@ y_min                =-'''+str(xmax)+'''   min y
 y_max                =+'''+str(xmax)+'''   max y 
 dy                   =  '''+str(dx)+'''   delta y
 
-z_min_inner          = 0
-z_max_inner          = 0
-dz_inner             = .05
+z_min_inner          = '''+str(-zmax_inner)+'''
+z_max_inner          = '''+str(zmax_inner)+'''
+dz_inner             = '''+str(dz_inner)+'''
 
-x_min_inner          = 0
-x_max_inner          = 0
-dx_inner             = .25
+x_min_inner          = '''+str(-xmax_inner)+'''
+x_max_inner          = '''+str(xmax_inner)+'''
+dx_inner             = '''+str(dx_inner)+'''
 
-y_min_inner          = 0
-y_max_inner          = 0
-dy_inner             = .25
+y_min_inner          = '''+str(-xmax_inner)+'''
+y_max_inner          = '''+str(xmax_inner)+'''
+dy_inner             = '''+str(dx_inner)+'''
 
 
 
@@ -203,7 +209,7 @@ p_factor             =1.50        momentum factor
 
 Ekin_min             =1.0e1  min kinetic energy per nucleon (MeV)
 Ekin_max             =1.0e9  max kinetic energy per nucleon
-Ekin_factor          =1.2        kinetic energy per nucleon factor
+Ekin_factor          =1.5        kinetic energy per nucleon factor
 
 p_Ekin_grid          = Ekin         p||Ekin alignment 
 
@@ -250,10 +256,13 @@ dvdz_conv            ='''+str(dvdz)+'''      km s-1 kpc-1  v_conv=v0_conv+dvdz_c
 nuc_rigid_br         = 11491.1      reference rigidity for nucleus injection index in MV
 nuc_g_1              = 1.87944        nucleus injection index below reference rigidity
 nuc_g_2              = '''+str(alpha_p)+'''       nucleus injection index index above reference rigidity
+nuc_g_1_inner   = '''+ str(alpha_p_inner) + ''' 1.6      electron injection index below electron_rigid_br0
 
 inj_spectrum_type    = rigidity     rigidity||beta_rig||Etot nucleon injection spectrum type 
 
 electron_g_0         = 1.6      electron injection index below electron_rigid_br0
+electron_g_0_inner   = '''+ str(alpha_e_inner) + ''' 1.6      electron injection index below electron_rigid_br0
+
 electron_rigid_br0   = 2178.46         reference rigidity0 for electron injection index in MV
 electron_g_1         = 2.41769        electron injection index below reference rigidity
 electron_rigid_br    = 2.20561e+06      reference rigidity for electron injection index in MV
@@ -562,16 +571,19 @@ done
 
 
 
-cat <<EOS | qsub -V -q normal -S /bin/bash -N galprop_"""+filename+""" -l nodes=1:ppn=2,walltime=12:00:00 - 
+cat <<EOS | qsub -V -q normal -S /bin/bash -N galprop_"""+filename+""" -l nodes=1:ppn=16,walltime=12:00:00 - 
 #cat <<EOS | qsub -V -q hyper -S /bin/bash -N galprop_"""+filename+""" -l nodes=1:ppn=32,walltime=12:00:00 - 
-export OMP_NUM_THREADS=2
-#/pfs/carlson/galprop/bin/galprop -r """ + filename + """ -o /pfs/carlson/galprop/output/
+
+export OMP_NUM_THREADS=16
+/pfs/carlson/galprop/bin/galprop -r """ + filename + """ -o /pfs/carlson/galprop/output/
 cd /pfs/carlson/GCE_sys/
 
 python /pfs/carlson/GCE_sys/GenDiffuseModel_X_CO_3zone_P8R2.py /pfs/carlson/galprop/output """ + filename + """ /pfs/carlson/galprop/GALDEF None """+str(int(fix_xco))+"""
+python RunAnalysis_P8.py /pfs/carlson/galprop/output/ """+filename +"""_XCO_P8_corrected 0  
+
+
 #python /pfs/carlson/GCE_sys/GenDiffuseModel_X_CO_3zone_P8R2_freeH.py /pfs/carlson/galprop/output """ + filename + """ /pfs/carlson/galprop/GALDEF None """+str(int(fix_xco))+"""
 
-python RunAnalysis_P8.py /pfs/carlson/galprop/output/ """+filename +"""_XCO_P8_corrected 0  
 # python RunAnalysis_P8.py /pfs/carlson/galprop/output/ """+filename +"""_XCO_P8_corrected_freeH 0 
 # python RunAnalysis_P8.py /pfs/carlson/galprop/output/ """+filename +"""_XCO_P8_corrected_freeH 24 
 #python RunAnalysis_P8.py /pfs/carlson/galprop/output/ """+filename +"""_XCO_P8_corrected 24
@@ -1149,6 +1161,7 @@ for sf in [3,]:
 #             HI_filename = 'HI_Pohl_galprop_8500.fits',  
 #             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
 #             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
 #        )
 #        count+=1
 
@@ -1188,193 +1201,214 @@ for sf in [3,]:
 # # -----------------------------------------------------
 # # Test Diffusion setup
 # # -----------------------------------------------------
-count = 0
-prefix = 'mod_p_'
+# count = 0
+# prefix = 'mod_p_'
 
-for HIModel,H2Model in [(1,1),]:#(1,1)]:
-    print HIModel, H2Model
+# for HIModel,H2Model in [(1,1),]:#(1,1)]:
+#     print HIModel, H2Model
 
-    for D_zz in np.logspace(np.log10(.25), np.log10(4), 9):
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=HIModel,
-            H2Model=H2Model,  
-            D_zz = D_zz, 
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for D_zz in np.logspace(np.log10(.25), np.log10(4), 9):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=HIModel,
+#             H2Model=H2Model,  
+#             D_zz = D_zz, 
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
 
-    for zmax in np.linspace(2,5,13):
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=HIModel,
-            H2Model=H2Model, 
-            zmax=zmax, 
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for zmax in np.linspace(2,5,13):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=HIModel,
+#             H2Model=H2Model, 
+#             zmax=zmax, 
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
 
-    for primary_source in ('Lorimer','SNR','OB','Yusifov'):
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=HIModel,
-            H2Model=H2Model,  
-            cr_source = primary_source,
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for primary_source in ('Lorimer','SNR','OB','Yusifov'):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=HIModel,
+#             H2Model=H2Model,  
+#             cr_source = primary_source,
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
 
-    for gas_renorm in ['rbands_hi12_v2_qdeg_zmax1_Ts100000_EBV_mag5_limit_9R_new.fits.gz',
-                       'rbands_hi12_v2_qdeg_zmax1_Ts100000_EBV_mag2_limit_9R_new.fits.gz',
-                       'rbands_hi12_v2_qdeg_zmax1_Ts150_EBV_mag5_limit_9R_new.fits.gz',
-                       'rbands_hi12_v2_qdeg_zmax1_Ts150_EBV_mag2_limit_9R_new.fits.gz']:
+#     for gas_renorm in ['rbands_hi12_v2_qdeg_zmax1_Ts100000_EBV_mag5_limit_9R_new.fits.gz',
+#                        'rbands_hi12_v2_qdeg_zmax1_Ts100000_EBV_mag2_limit_9R_new.fits.gz',
+#                        'rbands_hi12_v2_qdeg_zmax1_Ts150_EBV_mag5_limit_9R_new.fits.gz',
+#                        'rbands_hi12_v2_qdeg_zmax1_Ts150_EBV_mag2_limit_9R_new.fits.gz']:
 
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=HIModel,
-            H2Model=H2Model, 
-            HIR_filename = gas_renorm,
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=HIModel,
+#             H2Model=H2Model, 
+#             HIR_filename = gas_renorm,
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
 
-    for D_0 in np.logspace(np.log10(4e28),29.5,11):
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=HIModel,
-            H2Model=H2Model,  
-            D_0 = D_0,
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for D_0 in np.logspace(np.log10(4e28),29.5,11):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=HIModel,
+#             H2Model=H2Model,  
+#             D_0 = D_0,
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
 
-    for v_a in np.logspace(20,80,8):
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=HIModel,
-            H2Model=H2Model, 
-            v_Alfven = v_a, 
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for v_a in np.logspace(np.log10(20),np.log10(80),8):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=HIModel,
+#             H2Model=H2Model, 
+#             v_Alfven = v_a, 
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
 
-    for delta in np.linspace(.2,.5, 11):
-        GenGaldef(
-             filename=prefix+str(count),   # filename for output files and for galdef suffix
-             HIModel=1,
-             H2Model=1,  
-             delta=delta,
-             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-             HI_filename = 'HI_Pohl_galprop_8500.fits',  
-             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-             n_XCO = 3,
-        )
-        count+=1
-
-
-    for dvdz in np.linspace(0,75,11):
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=1,
-            H2Model=1, 
-            dvdz=dvdz,
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
-
-    count += 3 
-    # -------------------------------------------------
-    # B-field
-    # -------------------------------------------------
-    for B_0 in np.linspace(0,16.,9):
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=1,
-            H2Model=1, 
-            B_0 = B_0,
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for delta in np.linspace(.2,.5, 11):
+#         GenGaldef(
+#              filename=prefix+str(count),   # filename for output files and for galdef suffix
+#              HIModel=1,
+#              H2Model=1,  
+#              delta=delta,
+#              H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#              HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#              H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#              HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#              n_XCO = 3,
+#         )
+#         count+=1
 
 
-    for r_b in np.linspace(5,10,6):
-        GenGaldef(
-            filename=prefix+str(count),   # filename for output files and for galdef suffix
-            HIModel=1,
-            H2Model=1, 
-            r_b = r_b, 
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for dvdz in np.linspace(0,75,11):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=1,
+#             H2Model=1, 
+#             dvdz=dvdz,
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
+
+#     count += 3 
+#     # -------------------------------------------------
+#     # B-field
+#     # -------------------------------------------------
+#     for B_0 in np.linspace(0,16.,9):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=1,
+#             H2Model=1, 
+#             B_0 = B_0,
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
 
 
-    for z_b in np.linspace(1,4,6):
-        GenGaldef(
-            filename=prefix+str(count),    # filename for output files and for galdef suffix
-            HIModel=1,
-            H2Model=1, 
-            z_b = z_b, 
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for r_b in np.linspace(5,10,6):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=1,
+#             H2Model=1, 
+#             r_b = r_b, 
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
+
+
+#     for z_b in np.linspace(1,4,6):
+#         GenGaldef(
+#             filename=prefix+str(count),    # filename for output files and for galdef suffix
+#             HIModel=1,
+#             H2Model=1, 
+#             z_b = z_b, 
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
 
 
 
 
-    for isrf_opt_fir in np.linspace(.5,3,8):
-        GenGaldef(
-            filename=prefix+str(count),    # filename for output files and for galdef suffix
-            HIModel=1,
-            H2Model=1, 
-            isrf_opt_fir=isrf_opt_fir,
-            H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-            HI_filename = 'HI_Pohl_galprop_8500.fits',  
-            H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-            HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-            n_XCO = 3,
-        )
-        count+=1
+#     for isrf_opt_fir in np.linspace(.5,3,8):
+#         GenGaldef(
+#             filename=prefix+str(count),    # filename for output files and for galdef suffix
+#             HIModel=1,
+#             H2Model=1, 
+#             isrf_opt_fir=isrf_opt_fir,
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
+
+#     for adjust_index in np.linspace(-.5,.5,8):
+#         alpha_p_inner=1.87944
+#         alpha_e_inner=1.6
+
+#         GenGaldef(
+#             filename=prefix+str(count),    # filename for output files and for galdef suffix
+#             HIModel=1,
+#             H2Model=1, 
+#             alpha_p_inner=1.87944 + adjust_index, 
+#             alpha_e_inner=1.6 + adjust_index, 
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
+
+
+    
 
 
 
@@ -1389,7 +1423,11 @@ for HIModel,H2Model in [(1,1),]:#(1,1)]:
 #         GenGaldef(
 #              filename=prefix+str(count),   # filename for output files and for galdef suffix
 #              HIModel=1,
-#              H2Model=1,  
+#              H2Model=1,
+#              xmax_inner=2, 
+#              zmax_inner=1, 
+#              dx_inner=.125,
+#              dz_inner=.0625,  
 #              convection=4,
 #              v0_conv=v_conv_r, 
 #              dvdz = 0, 
@@ -1398,6 +1436,7 @@ for HIModel,H2Model in [(1,1),]:#(1,1)]:
 #              HI_filename = 'HI_Pohl_galprop_8500.fits',  
 #              H2_filename_rlb='CO_Pohl_8500_rlb.fits',
 #              HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#              n_XCO = 3,
 #         )
 #         count+=1
 
@@ -1479,6 +1518,58 @@ for HIModel,H2Model in [(1,1),]:#(1,1)]:
 
 
 
+# # -----------------------------------------------------
+# # Updated XCO values
+# # -----------------------------------------------------
+# count = 0
+# prefix = 'mod_sHR_'
+# for spiral_fraction in np.linspace(0,.3,7):
+#     GenGaldef(
+#         xmax_inner=2, 
+#         zmax_inner=1, 
+#         dx_inner=.125,
+#         dz_inner=.0625,
+#         filename=prefix+str(count),   # filename for output files and for galdef suffix
+#         HIModel=1,
+#         H2Model=1,  
+#         spiral_fraction=spiral_fraction,
+#         kennicutt_index=1.5,
+#         kennicutt_threshold = .1, 
+#         H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#         HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#         H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#         HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#         n_XCO = 3,
+#     )
+#     count+=1
+
+
+# count = 0
+# prefix = 'mod_sBfield_'
+# for spiral_fraction in np.linspace(0,.3,7):
+#     GenGaldef(
+#         # xmax_inner=2, 
+#         # zmax_inner=1, 
+#         # dx_inner=.125,
+#         # dz_inner=.0625,
+#         z_b = 4,
+#         r_b = 10,
+#         filename=prefix+str(count),   # filename for output files and for galdef suffix
+#         HIModel=1,
+#         H2Model=1,  
+#         spiral_fraction=spiral_fraction,
+#         kennicutt_index=1.5,
+#         kennicutt_threshold = .1, 
+#         H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#         HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#         H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#         HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#         n_XCO = 3,
+#     )
+#     count+=1
+
+
+
 # count = 0
 # prefix = 'mod_s5_'
 # for spiral_fraction in np.linspace(0,1,21):
@@ -1523,10 +1614,109 @@ for HIModel,H2Model in [(1,1),]:#(1,1)]:
 
 
 # count = 0
+# prefix = 'mod_s_'
+# for HIModel,H2Model in [(2,2),(1,1)]:
+    
+#     print HIModel, H2Model
+
+#     for kennicutt_index in np.linspace(1.,1.75,4):
+#         for spiral_fraction in np.linspace(0,.3,7):
+#             GenGaldef(
+#                 filename=prefix+str(count),   # filename for output files and for galdef suffix
+#                 HIModel=HIModel,
+#                 H2Model=H2Model,  
+#                 spiral_fraction=spiral_fraction,
+#                 kennicutt_index=kennicutt_index,
+#                 kennicutt_threshold = .1, 
+#                 H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#                 HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#                 H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#                 HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#                 n_XCO = 3,
+#                 start_skip=41,
+#                 stop_skip=49,
+#             )
+#             count+=1
+
+
+
+
+# count = 0
+# prefix = 'mod_sthin_'
+
+# for spiral_fraction in np.linspace(0,.3,7):
+#         GenGaldef(
+#             filename=prefix+str(count),   # filename for output files and for galdef suffix
+#             HIModel=1,
+#             H2Model=1,  
+#             spiral_fraction=spiral_fraction,
+#             kennicutt_index=1.5,
+#             kennicutt_threshold = 1., 
+#             zmax=2.25, 
+#             H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#             HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#             H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#             HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#             n_XCO = 3,
+#         )
+#         count+=1
+    
+        
+
+
+#######################################
+# Scan over rho_c and fh2. 
+#######################################
+# count = 0
+# prefix = 'mod_z_'
+# for HIModel,H2Model in [(1,1),]:
+#     for kennicutt_threshold in np.logspace(-1,np.log10(2),5):
+#         for spiral_fraction in np.linspace(0,.3,7):
+#             GenGaldef(
+#                 filename=prefix+str(count),   # filename for output files and for galdef suffix
+#                 HIModel=HIModel,
+#                 H2Model=H2Model,  
+#                 spiral_fraction=spiral_fraction,
+#                 kennicutt_index=1.5,
+#                 kennicutt_threshold = kennicutt_threshold, 
+#                 H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#                 HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#                 H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#                 HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#                 n_XCO = 3,
+#             )
+#             count+=1
+
+#######################################
+# Scan over rho_c and fh2. 
+#######################################
+# count = 0
+# prefix = 'mod_z2_'
+# for HIModel,H2Model in [(1,1),]:
+#     for kennicutt_threshold in np.logspace(-1,np.log10(2),5):
+#         for kennicutt_index in np.linspace(1.,1.75,4):
+#             GenGaldef(
+#                 filename=prefix+str(count),   # filename for output files and for galdef suffix
+#                 HIModel=HIModel,
+#                 H2Model=H2Model,  
+#                 spiral_fraction=.2,
+#                 kennicutt_index=kennicutt_index,
+#                 kennicutt_threshold = kennicutt_threshold, 
+#                 H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+#                 HI_filename = 'HI_Pohl_galprop_8500.fits',  
+#                 H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+#                 HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+#                 n_XCO = 3,
+#             )
+#             count+=1
+
+
+
+# count = 0
 # prefix = 'mod_srcdist_'
 # for HIModel,H2Model in [(1,1),]:
 #     print HIModel, H2Model
-#     for primary_source in ('Lorimer','SNR','OB','Yusifov'):
+#     for primary_source in ('Lorimer','SNR','OB','Yusifov','SNR_GREEN'):
 #         for spiral_fraction in np.linspace(0,.3,4):
 #             GenGaldef(
 #                 filename=prefix+str(count),   # filename for output files and for galdef suffix
