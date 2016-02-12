@@ -19,18 +19,44 @@ cd ..//galprop/output/
 
 
 
-for i in {102..110}
+# for i in {0..20}
+# do
+#  	python strip_single.py mod_z2_"$i"_XCO_P8_corrected 0
+# done
+
+# for i in {0..20}
+# do
+# 	scp mod_z2_"$i"_XCO_P8_corrected_stripped.hdf5 planck:/data/GCE_sys/new 
+# done
+
+
+
+# for i in {100..112}
+# do
+#  	python strip_single.py mod_p_"$i"_XCO_P8_corrected 0
+#  	scp mod_p_"$i"_XCO_P8_corrected_stripped.hdf5 planck:/data/GCE_sys/new  &
+# done
+
+
+# for i in {0..12}
+# do
+#  	python strip_single.py mod_q_"$i"_XCO_P8_corrected 0
+#  	scp mod_q_"$i"_XCO_P8_corrected_stripped.hdf5 planck:/data/GCE_sys/new  &
+# done
+
+
+# for i in {0..12}
+# do
+#  	python strip_single.py mod_sHR_"$i"_XCO_P8_corrected 0
+#  	scp mod_sHR_"$i"_XCO_P8_corrected_stripped.hdf5 planck:/data/GCE_sys/new  &
+# done
+
+
+for i in {0..130}
 do
- 	python strip_single.py mod_p_"$i"_XCO_P8_corrected 0
+ 	python strip_single.py mod_v2_"$i"_XCO_P8_corrected 0
+ 	scp mod_v2_"$i"_XCO_P8_corrected_stripped.hdf5 planck:/data/GCE_sys/new  &
 done
-
-for i in {102..110}
-do
-	scp mod_p_"$i"_XCO_P8_corrected_stripped.hdf5 planck:/data/GCE_sys/new 
-done
-
-
-
 
 
 

@@ -223,7 +223,9 @@ def RunFit(A, nrings=9, limit_inner=None, fix_xco=False, tag='', output_loglike=
     if limit_inner is not None:
         if fix_xco is False:
             for j in range(1,10):
-                A.templateList['pi0_H2_%i'%j].limits=[limit_inner*1e19/4e19,None] # set inner ring limit to not fall below inner_limit
+                X_CO_values_GAL = [1e+19, 8.42e+19, 1.61e+20, 1.73e+20, 1.72e+20, 1.74e+20, 8.61e+19, 4.29e+20, 2.01e+21]
+                A.templateList['pi0_H2_%i'%j].limits=[limit_inner*1e19/X_CO_values_GAL[j-1],None] # set inner ring limit to not fall below inner_limit
+                #A.templateList['pi0_H2_%i'%j].limits=[limit_inner*1e19/4e19,None] # set inner ring limit to not fall below inner_limit
 
     # Let the inner 6 rings float
     for i in range(1,7):

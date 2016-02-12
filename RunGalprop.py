@@ -49,15 +49,16 @@ def GenGaldef(
     alpha_p=2.39,
     alpha_p_inner=-100,
     alpha_e_inner=-100,
-    numProc=105,
+    numProc=150,
     start_skip=-1,
-    stop_skip=500, # only run if filename is between start and stop
+    stop_skip=150, # only run if filename is between start and stop
     spike_norm=0,
     spike_sigma=.2,
     fix_xco=0,
     B_field_name='galprop_original',
     gamma_rays=2,
     synchrotron=1,
+    CMZ_multiplier=1,
     ):
 
     if 'base' not in filename and 'Mod_A' not in filename and 'extreme' not in filename:
@@ -184,10 +185,10 @@ dz                   = '''+str(dz)+'''   delta z
 
 x_min                =-'''+str(xmax)+'''   min x 
 x_max                =+'''+str(xmax)+'''   max x 
-dx                   =  '''+str(dx)+'''   delta x
+dx                   = '''+str(dx)+'''   delta x
 y_min                =-'''+str(xmax)+'''   min y 
 y_max                =+'''+str(xmax)+'''   max y 
-dy                   =  '''+str(dx)+'''   delta y
+dy                   = '''+str(dx)+'''   delta y
 
 z_min_inner          = '''+str(-zmax_inner)+'''
 z_max_inner          = '''+str(zmax_inner)+'''
@@ -256,7 +257,7 @@ dvdz_conv            ='''+str(dvdz)+'''      km s-1 kpc-1  v_conv=v0_conv+dvdz_c
 nuc_rigid_br         = 11491.1      reference rigidity for nucleus injection index in MV
 nuc_g_1              = 1.87944        nucleus injection index below reference rigidity
 nuc_g_2              = '''+str(alpha_p)+'''       nucleus injection index index above reference rigidity
-nuc_g_1_inner   = '''+ str(alpha_p_inner) + ''' 1.6      electron injection index below electron_rigid_br0
+nuc_g_1_inner        = '''+ str(alpha_p_inner) + ''' 1.6      electron injection index below electron_rigid_br0
 
 inj_spectrum_type    = rigidity     rigidity||beta_rig||Etot nucleon injection spectrum type 
 
@@ -315,6 +316,7 @@ vectorized           = 0  0=unvectorized code, 1=vectorized code
 ''' + CRDist+'''
 
 spiral_fraction      = ''' +str(spiral_fraction)+ '''
+CMZ_multiplier       = ''' +str(CMZ_multiplier)+ '''
 kennicutt_index      = ''' + str(kennicutt_index) + '''
 kennicutt_threshold  = ''' + str(kennicutt_threshold) + '''
 
@@ -571,12 +573,13 @@ done
 
 
 
-cat <<EOS | qsub -V -q normal -S /bin/bash -N galprop_"""+filename+""" -l nodes=1:ppn=16,walltime=12:00:00 - 
+cat <<EOS | qsub -V -q normal -S /bin/bash -N galprop_"""+filename+""" -l nodes=1:ppn=16,walltime=32:00:00 - 
 #cat <<EOS | qsub -V -q hyper -S /bin/bash -N galprop_"""+filename+""" -l nodes=1:ppn=32,walltime=12:00:00 - 
 
 export OMP_NUM_THREADS=16
 /pfs/carlson/galprop/bin/galprop -r """ + filename + """ -o /pfs/carlson/galprop/output/
 cd /pfs/carlson/GCE_sys/
+
 
 python /pfs/carlson/GCE_sys/GenDiffuseModel_X_CO_3zone_P8R2.py /pfs/carlson/galprop/output """ + filename + """ /pfs/carlson/galprop/GALDEF None """+str(int(fix_xco))+"""
 python RunAnalysis_P8.py /pfs/carlson/galprop/output/ """+filename +"""_XCO_P8_corrected 0  
@@ -1198,9 +1201,9 @@ for sf in [3,]:
 
 
 
-# # -----------------------------------------------------
-# # Test Diffusion setup
-# # -----------------------------------------------------
+# -----------------------------------------------------
+# Test Diffusion setup
+# -----------------------------------------------------
 # count = 0
 # prefix = 'mod_p_'
 
@@ -1424,8 +1427,10 @@ for sf in [3,]:
 #              filename=prefix+str(count),   # filename for output files and for galdef suffix
 #              HIModel=1,
 #              H2Model=1,
-#              xmax_inner=2, 
-#              zmax_inner=1, 
+#              dx=.25, 
+#              dz=.1,
+#              xmax_inner=0, 
+#              zmax_inner=0, 
 #              dx_inner=.125,
 #              dz_inner=.0625,  
 #              convection=4,
@@ -1502,7 +1507,7 @@ for sf in [3,]:
 #             GenGaldef(
 #                 filename=prefix+str(count),   # filename for output files and for galdef suffix
 #                 HIModel=HIModel,
-#                 H2Model=H2Model,  
+#                 H2Model=H2Model, 
 #                 spiral_fraction=spiral_fraction,
 #                 kennicutt_index=kennicutt_index,
 #                 kennicutt_threshold = .1, 
@@ -1511,6 +1516,7 @@ for sf in [3,]:
 #                 H2_filename_rlb='CO_Pohl_8500_rlb.fits',
 #                 HI_filename_rlb='HI_Pohl_8500_rlb.fits',
 #                 n_XCO = 3,
+#                 secondary_hadrons=1,
 #                 start_skip=41,
 #                 stop_skip=49,
 #             )
@@ -1521,27 +1527,29 @@ for sf in [3,]:
 # # -----------------------------------------------------
 # # Updated XCO values
 # # -----------------------------------------------------
-# count = 0
-# prefix = 'mod_sHR_'
-# for spiral_fraction in np.linspace(0,.3,7):
-#     GenGaldef(
-#         xmax_inner=2, 
-#         zmax_inner=1, 
-#         dx_inner=.125,
-#         dz_inner=.0625,
-#         filename=prefix+str(count),   # filename for output files and for galdef suffix
-#         HIModel=1,
-#         H2Model=1,  
-#         spiral_fraction=spiral_fraction,
-#         kennicutt_index=1.5,
-#         kennicutt_threshold = .1, 
-#         H2_filename = 'CO_PEB_galprop_8500.fits.gz',
-#         HI_filename = 'HI_Pohl_galprop_8500.fits',  
-#         H2_filename_rlb='CO_Pohl_8500_rlb.fits',
-#         HI_filename_rlb='HI_Pohl_8500_rlb.fits',
-#         n_XCO = 3,
-#     )
-#     count+=1
+count = 0
+prefix = 'mod_sHR_'
+for spiral_fraction in np.linspace(0,.3,7):
+    GenGaldef(
+        filename=prefix+str(count),   # filename for output files and for galdef suffix
+        HIModel=1,
+        H2Model=1, 
+        dx=1, 
+        dz=.1,
+        xmax_inner=2, 
+        zmax_inner=1, 
+        dx_inner=.2,
+        dz_inner=.0625,
+        spiral_fraction=spiral_fraction,
+        kennicutt_index=1.5,
+        kennicutt_threshold = .1, 
+        H2_filename = 'CO_PEB_galprop_8500.fits.gz',
+        HI_filename = 'HI_Pohl_galprop_8500.fits',  
+        H2_filename_rlb='CO_Pohl_8500_rlb.fits',
+        HI_filename_rlb='HI_Pohl_8500_rlb.fits',
+        n_XCO = 3,
+    )
+    count+=1
 
 
 # count = 0
@@ -1928,6 +1936,31 @@ for sf in [3,]:
 #         n_XCO = 9, 
 #         fix_xco=True)  
 #     count+=1
+
+# # -----------------------------------------------------
+# # Test Spike vs wind
+# # -----------------------------------------------------
+count = 0
+prefix = 'mod_v2_'
+
+for v_conv_r in np.linspace(0,700,8):
+    for CMZ_multiplier in np.linspace(1,8,8):
+        GenGaldef(
+            filename=prefix+str(count),
+            HIModel=1, # 1=galprop classic, 2=3D cube NS,  3=3D F07 <1.5 kpc
+            H2Model=1, # 1=galprop classic, 2=3D cube PEB, 3=3D F07 <1.5kpc
+            n_spatial_dimensions=2, 
+            dx=.1, # kpc for dx and dy propagation grid
+            dz=.1, # kpc for dz propagation grid
+            convection=4,
+            spiral_fraction=0.2, 
+            v0_conv=v_conv_r, 
+            dvdz = 0, 
+            cr_source='SNR',
+            CMZ_multiplier=CMZ_multiplier,
+            numProc=32
+            )
+        count+=1
 
 
 #-------------------------------------------------
